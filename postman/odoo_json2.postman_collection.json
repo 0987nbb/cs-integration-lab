@@ -1,0 +1,340 @@
+{
+  "info": {
+    "name": "Odoo Integration Lab - JSON-2 API + 5 External APIs",
+    "description": "Proof collection for the Odoo Integration Lab.\n\nFolder 1 proves Odoo 19 JSON-2 CREATE / READ / UPDATE / DELETE against res.partner. Run the folder in order: CREATE stores the new id into the `proof_partner_id` environment variable, and the later requests reuse it.\n\nFolders 2-6 issue the exact upstream requests the Python service makes.\n\nNo credential is stored in this file. `odoo_api_key` and `github_token` live in the environment file and must be filled in locally; never commit a populated environment.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "odoo_url", "value": "https://ai-demo-company.odoo.com" },
+    { "key": "odoo_database", "value": "ai-demo-company" }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{odoo_api_key}}", "type": "string" }]
+  },
+  "item": [
+    {
+      "name": "1. Odoo JSON-2 CRUD proof",
+      "description": "CREATE -> READ -> UPDATE -> READ -> DELETE on res.partner. Mirrors `python -m integration_service.cli --proof`.",
+      "item": [
+        {
+          "name": "1.1 CREATE res.partner",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const ids = pm.response.json();",
+                  "pm.test('returns one id', () => pm.expect(ids).to.be.an('array').with.lengthOf(1));",
+                  "pm.environment.set('proof_partner_id', ids[0]);",
+                  "console.log('created res.partner id', ids[0]);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-Odoo-Database", "value": "{{odoo_database}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": { "raw": "{{odoo_url}}/json/2/res.partner/create", "host": ["{{odoo_url}}"], "path": ["json", "2", "res.partner", "create"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"vals_list\": [\n    {\n      \"name\": \"ZZ Postman JSON-2 Proof\",\n      \"email\": \"postman-proof@example.invalid\",\n      \"x_external_id\": \"proof:postman:1\",\n      \"x_source_hash\": \"initial\"\n    }\n  ]\n}"
+            }
+          }
+        },
+        {
+          "name": "1.2 READ (after create)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const rows = pm.response.json();",
+                  "pm.test('record found', () => pm.expect(rows).to.have.lengthOf(1));",
+                  "pm.test('hash is initial', () => pm.expect(rows[0].x_source_hash).to.eql('initial'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-Odoo-Database", "value": "{{odoo_database}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": { "raw": "{{odoo_url}}/json/2/res.partner/search_read", "host": ["{{odoo_url}}"], "path": ["json", "2", "res.partner", "search_read"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"domain\": [[\"id\", \"=\", {{proof_partner_id}}]],\n  \"fields\": [\"id\", \"name\", \"email\", \"x_external_id\", \"x_source_hash\", \"write_date\"]\n}"
+            }
+          }
+        },
+        {
+          "name": "1.3 UPDATE res.partner",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('write returned true', () => pm.expect(pm.response.json()).to.eql(true));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-Odoo-Database", "value": "{{odoo_database}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": { "raw": "{{odoo_url}}/json/2/res.partner/write", "host": ["{{odoo_url}}"], "path": ["json", "2", "res.partner", "write"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ids\": [{{proof_partner_id}}],\n  \"vals\": {\n    \"email\": \"postman-proof-updated@example.invalid\",\n    \"x_source_hash\": \"updated\"\n  }\n}"
+            }
+          }
+        },
+        {
+          "name": "1.4 READ (after update)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const rows = pm.response.json();",
+                  "pm.test('email updated', () => pm.expect(rows[0].email).to.eql('postman-proof-updated@example.invalid'));",
+                  "pm.test('hash updated', () => pm.expect(rows[0].x_source_hash).to.eql('updated'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-Odoo-Database", "value": "{{odoo_database}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": { "raw": "{{odoo_url}}/json/2/res.partner/search_read", "host": ["{{odoo_url}}"], "path": ["json", "2", "res.partner", "search_read"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"domain\": [[\"id\", \"=\", {{proof_partner_id}}]],\n  \"fields\": [\"id\", \"name\", \"email\", \"x_source_hash\"]\n}"
+            }
+          }
+        },
+        {
+          "name": "1.5 DELETE res.partner",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('unlink returned true', () => pm.expect(pm.response.json()).to.eql(true));",
+                  "pm.environment.unset('proof_partner_id');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-Odoo-Database", "value": "{{odoo_database}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": { "raw": "{{odoo_url}}/json/2/res.partner/unlink", "host": ["{{odoo_url}}"], "path": ["json", "2", "res.partner", "unlink"] },
+            "body": { "mode": "raw", "raw": "{\n  \"ids\": [{{proof_partner_id}}]\n}" }
+          }
+        },
+        {
+          "name": "1.6 READ sync logs (expected 403 until an access rule exists)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('403 documents the missing access rule, 200 means it was granted', () =>",
+                  "  pm.expect([200, 403]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-Odoo-Database", "value": "{{odoo_database}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": { "raw": "{{odoo_url}}/json/2/x_integration_sync_log/search_read", "host": ["{{odoo_url}}"], "path": ["json", "2", "x_integration_sync_log", "search_read"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"domain\": [],\n  \"fields\": [\"x_name\", \"x_provider\", \"x_status\", \"x_created_count\", \"x_updated_count\", \"x_skipped_count\", \"x_failed_count\", \"x_start_time\", \"x_end_time\"],\n  \"limit\": 20,\n  \"order\": \"id desc\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. GitHub REST",
+      "item": [
+        {
+          "name": "GET issues",
+          "request": {
+            "method": "GET",
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{github_token}}", "type": "string" }] },
+            "header": [
+              { "key": "Accept", "value": "application/vnd.github+json" },
+              { "key": "X-GitHub-Api-Version", "value": "2022-11-28" }
+            ],
+            "url": {
+              "raw": "https://api.github.com/repos/{{github_owner}}/{{github_repo}}/issues?state=all&per_page=100",
+              "protocol": "https",
+              "host": ["api", "github", "com"],
+              "path": ["repos", "{{github_owner}}", "{{github_repo}}", "issues"],
+              "query": [
+                { "key": "state", "value": "all" },
+                { "key": "per_page", "value": "100" }
+              ]
+            },
+            "description": "Pagination follows the RFC-8288 Link header, rel=\"next\". Unauthenticated the limit is 60 requests/hour."
+          }
+        },
+        {
+          "name": "POST issue (requires a token)",
+          "request": {
+            "method": "POST",
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{github_token}}", "type": "string" }] },
+            "header": [
+              { "key": "Accept", "value": "application/vnd.github+json" },
+              { "key": "X-GitHub-Api-Version", "value": "2022-11-28" }
+            ],
+            "url": {
+              "raw": "https://api.github.com/repos/{{github_owner}}/{{github_repo}}/issues",
+              "protocol": "https",
+              "host": ["api", "github", "com"],
+              "path": ["repos", "{{github_owner}}", "{{github_repo}}", "issues"]
+            },
+            "body": { "mode": "raw", "raw": "{\n  \"title\": \"Created from Odoo project.task\",\n  \"body\": \"Outbound proof.\"\n}" },
+            "description": "Without GITHUB_TOKEN the Python service records this as [MOCK WRITE] instead of sending it."
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. JSONPlaceholder",
+      "item": [
+        {
+          "name": "GET users",
+          "request": { "method": "GET", "url": { "raw": "{{jsonplaceholder_base}}/users" }, "description": "Primary host api.jsonplaceholder.dev is unreachable; the service falls back to jsonplaceholder.typicode.com." }
+        },
+        { "name": "GET posts", "request": { "method": "GET", "url": { "raw": "{{jsonplaceholder_base}}/posts" } } },
+        {
+          "name": "POST post (mock write)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{jsonplaceholder_base}}/posts" },
+            "body": { "mode": "raw", "raw": "{\n  \"title\": \"From Odoo\",\n  \"body\": \"Outbound demonstration.\",\n  \"userId\": 1\n}" },
+            "description": "JSONPlaceholder echoes a fake id and persists nothing, so the service labels this [MOCK WRITE]."
+          }
+        },
+        {
+          "name": "PATCH post (mock write)",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{jsonplaceholder_base}}/posts/1" },
+            "body": { "mode": "raw", "raw": "{\n  \"title\": \"Updated from Odoo\"\n}" }
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Frankfurter v2",
+      "item": [
+        {
+          "name": "GET rates",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "https://api.frankfurter.dev/v2/rates?base=USD&quotes=EUR,GBP,TRY,PKR",
+              "protocol": "https",
+              "host": ["api", "frankfurter", "dev"],
+              "path": ["v2", "rates"],
+              "query": [
+                { "key": "base", "value": "USD" },
+                { "key": "quotes", "value": "EUR,GBP,TRY,PKR" }
+              ]
+            },
+            "description": "Returns a JSON array of {date, base, quote, rate}. Company currency is PKR, so odoo_rate(Q) = rate(USD->Q) / rate(USD->PKR)."
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Open-Meteo",
+      "item": [
+        {
+          "name": "GET 7-day forecast",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "https://api.open-meteo.com/v1/forecast?latitude=31.5204&longitude=74.3587&daily=temperature_2m_max,temperature_2m_min&timezone=auto",
+              "protocol": "https",
+              "host": ["api", "open-meteo", "com"],
+              "path": ["v1", "forecast"],
+              "query": [
+                { "key": "latitude", "value": "31.5204" },
+                { "key": "longitude", "value": "74.3587" },
+                { "key": "daily", "value": "temperature_2m_max,temperature_2m_min" },
+                { "key": "timezone", "value": "auto" }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Nager.Date",
+      "item": [
+        {
+          "name": "GET holidays (US)",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "https://date.nager.at/api/v4/Holidays/US/2026", "protocol": "https", "host": ["date", "nager", "at"], "path": ["api", "v4", "Holidays", "US", "2026"] }
+          }
+        },
+        {
+          "name": "GET holidays (PK - returns 204)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('204 means the provider has no data for this country', () =>",
+                  "  pm.expect(pm.response.code).to.eql(204));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": { "raw": "https://date.nager.at/api/v4/Holidays/PK/2026", "protocol": "https", "host": ["date", "nager", "at"], "path": ["api", "v4", "Holidays", "PK", "2026"] },
+            "description": "The service counts this as skipped, not failed."
+          }
+        }
+      ]
+    }
+  ]
+}

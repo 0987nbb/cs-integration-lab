@@ -3,17 +3,23 @@
     'name': 'CS Integration Lab',
     'version': '19.0.1.0.0',
     'category': 'Technical',
-    'summary': 'Odoo 19 Integration Lab Module',
+    'summary': 'Odoo 19 Integration Lab Module Foundation',
     'description': """
         Odoo 19 Module for CS Integration Lab.
-        Provides models, views, and Odoo JSON-2 API endpoints for external integrations.
+        Provides core foundation for external API integrations (GitHub, JSONPlaceholder, Frankfurter, Open-Meteo, Nager.Date),
+        including integration configurations, sync logs, security groups, scheduled crons, and idempotency mixins.
     """,
     'author': 'CS Technical Assessment',
     'website': '',
-    'depends': ['base'],
+    'depends': ['base', 'mail'],
     'data': [
-        # 'security/ir.model.access.csv',
-        # 'views/menu_views.xml',
+        'security/groups.xml',
+        'security/ir.model.access.csv',
+        'data/sequence_data.xml',
+        'data/cron_data.xml',
+        'views/integration_config_views.xml',
+        'views/sync_log_views.xml',
+        'views/menus.xml',
     ],
     'installable': True,
     'application': True,

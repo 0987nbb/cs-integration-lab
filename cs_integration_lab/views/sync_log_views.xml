@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        <!-- Sync Log List View -->
+        <record id="view_cs_integration_sync_log_tree" model="ir.ui.view">
+            <field name="name">cs.integration.sync.log.tree</field>
+            <field name="model">cs.integration.sync.log</field>
+            <field name="arch" type="xml">
+                <list string="Synchronization Logs" create="false" edit="false">
+                    <field name="name"/>
+                    <field name="provider"/>
+                    <field name="start_time"/>
+                    <field name="end_time"/>
+                    <field name="status" widget="badge" decoration-success="status == 'success'" decoration-info="status == 'running'" decoration-warning="status == 'partial' or status == 'skipped'" decoration-danger="status == 'failed'"/>
+                    <field name="created_count"/>
+                    <field name="updated_count"/>
+                    <field name="skipped_count"/>
+                    <field name="failed_count"/>
+                </list>
+            </field>
+        </record>
+
+        <!-- Sync Log Form View -->
+        <record id="view_cs_integration_sync_log_form" model="ir.ui.view">
+            <field name="name">cs.integration.sync.log.form</field>
+            <field name="model">cs.integration.sync.log</field>
+            <field name="arch" type="xml">
+                <form string="Synchronization Log" create="false" edit="false">
+                    <header>
+                        <field name="status" widget="statusbar" statusbar_visible="running,success,partial,failed,skipped"/>
+                    </header>
+                    <sheet>
+                        <div class="oe_title">
+                            <h1>
+                                <field name="name"/>
+                            </h1>
+                        </div>
+                        <group>
+                            <group string="Execution Info">
+                                <field name="provider"/>
+                                <field name="config_id"/>
+                                <field name="start_time"/>
+                                <field name="end_time"/>
+                            </group>
+                            <group string="Statistics">
+                                <field name="created_count"/>
+                                <field name="updated_count"/>
+                                <field name="skipped_count"/>
+                                <field name="failed_count"/>
+                            </group>
+                        </group>
+                        <notebook>
+                            <page string="Log Details &amp; Errors">
+                                <field name="error_details" placeholder="No errors recorded." readonly="1"/>
+                            </page>
+                        </notebook>
+                    </sheet>
+                </form>
+            </field>
+        </record>
+
+        <!-- Sync Log Search View -->
+        <record id="view_cs_integration_sync_log_search" model="ir.ui.view">
+            <field name="name">cs.integration.sync.log.search</field>
+            <field name="model">cs.integration.sync.log</field>
+            <field name="arch" type="xml">
+                <search string="Search Sync Logs">
+                    <field name="name"/>
+                    <field name="provider"/>
+                    <filter string="Success" name="success" domain="[('status', '=', 'success')]"/>
+                    <filter string="Failed" name="failed" domain="[('status', '=', 'failed')]"/>
+                    <filter string="Running" name="running" domain="[('status', '=', 'running')]"/>
+                    <group>
+                        <filter string="Provider" name="group_provider" context="{'group_by': 'provider'}"/>
+                        <filter string="Status" name="group_status" context="{'group_by': 'status'}"/>
+                    </group>
+                </search>
+            </field>
+        </record>
+
+        <!-- Sync Log Action -->
+        <record id="action_cs_integration_sync_log" model="ir.actions.act_window">
+            <field name="name">Sync Logs</field>
+            <field name="res_model">cs.integration.sync.log</field>
+            <field name="view_mode">list,form</field>
+            <field name="search_view_id" ref="view_cs_integration_sync_log_search"/>
+            <field name="help" type="html">
+                <p class="o_view_nocontent_smiling_face">
+                    No sync logs recorded yet.
+                </p>
+                <p>
+                    Synchronization logs from scheduled or manual triggers will appear here.
+                </p>
+            </field>
+        </record>
+    </data>
+</odoo>

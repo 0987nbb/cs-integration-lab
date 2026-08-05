@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data noupdate="0">
+        <!-- Category for Integration Lab -->
+        <record id="module_category_integration_lab" model="ir.module.category">
+            <field name="name">Integration Lab</field>
+            <field name="sequence">50</field>
+        </record>
+
+        <!-- Integration Manager Group -->
+        <record id="group_integration_manager" model="res.groups">
+            <field name="name">Integration Manager</field>
+            <field name="implied_ids" eval="[(4, ref('base.group_user'))]"/>
+            <field name="user_ids" eval="[(4, ref('base.user_admin'))]"/>
+        </record>
+
+        <!-- Automatically grant Integration Manager to System Administrators -->
+        <record id="base.group_system" model="res.groups">
+            <field name="implied_ids" eval="[(4, ref('group_integration_manager'))]"/>
+        </record>
+    </data>
+</odoo>

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        <!-- Root Menu -->
+        <menuitem id="menu_cs_integration_lab_root"
+                  name="Integration Lab"
+                  web_icon="cs_integration_lab,static/description/icon.png"
+                  sequence="10"/>
+
+        <!-- Integrations Submenu -->
+        <menuitem id="menu_cs_integration_config"
+                  name="Integrations"
+                  parent="menu_cs_integration_lab_root"
+                  action="action_cs_integration_config"
+                  sequence="10"/>
+
+        <!-- Sync Logs Submenu -->
+        <menuitem id="menu_cs_integration_sync_log"
+                  name="Sync Logs"
+                  parent="menu_cs_integration_lab_root"
+                  action="action_cs_integration_sync_log"
+                  sequence="20"/>
+    </data>
+</odoo>

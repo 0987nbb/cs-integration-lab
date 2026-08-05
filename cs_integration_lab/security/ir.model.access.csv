@@ -1,0 +1,5 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_cs_integration_config_manager,cs.integration.config.manager,model_cs_integration_config,cs_integration_lab.group_integration_manager,1,1,1,1
+access_cs_integration_config_user,cs.integration.config.user,model_cs_integration_config,base.group_user,1,0,0,0
+access_cs_integration_sync_log_manager,cs.integration.sync.log.manager,model_cs_integration_sync_log,cs_integration_lab.group_integration_manager,1,1,1,1
+access_cs_integration_sync_log_user,cs.integration.sync.log.user,model_cs_integration_sync_log,base.group_user,1,0,0,0
