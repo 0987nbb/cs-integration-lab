@@ -19,6 +19,7 @@
         'data/cron_data.xml',
         'views/integration_config_views.xml',
         'views/sync_log_views.xml',
+        'views/res_partner_views.xml',
         'views/menus.xml',
     ],
     'installable': True,

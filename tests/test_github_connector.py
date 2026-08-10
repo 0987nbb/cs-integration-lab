@@ -487,7 +487,7 @@ def test_outbound_writes_are_mocked_when_no_token_is_configured(new_connector, o
     assert "'title': 'Login button is unresponsive'" in patches[0]
     # The issue body survives the HTML round trip through the description.
     assert "Clicking Login does nothing." in patches[0]
-    assert result.details["outbound"] == {"updates": 1, "creates": 1, "sent": False}
+    assert result.details["outbound"] == {"updates": 1, "comments": 0, "creates": 1, "sent": False}
     assert any("[MOCK WRITE]" in note for note in result.notes)
     # Nothing left the process except the issue listing.
     assert methods == ["GET"]
@@ -516,7 +516,7 @@ def test_outbound_patch_is_sent_when_a_token_is_configured(new_connector, ctx, o
         sent = [c.request for c in second_run.calls if c.request.method == "PATCH"]
 
     assert result.mock_writes == []
-    assert result.details["outbound"] == {"updates": 1, "creates": 0, "sent": True}
+    assert result.details["outbound"] == {"updates": 1, "comments": 0, "creates": 0, "sent": True}
     assert result.updated == 1
     assert len(sent) == 1
     pushed = json.loads(sent[0].body)
@@ -553,7 +553,7 @@ def test_rerunning_an_untouched_repository_sends_nothing_back(new_connector, ctx
         methods = [c.request.method for c in second_run.calls]
 
     assert (rerun.created, rerun.updated, rerun.skipped, rerun.failed) == (0, 0, 2, 0)
-    assert rerun.details["outbound"] == {"updates": 0, "creates": 0, "sent": True}
+    assert rerun.details["outbound"] == {"updates": 0, "comments": 0, "creates": 0, "sent": True}
     assert rerun.mock_writes == []
     # The listing, and nothing else: no PATCH was even attempted.
     assert methods == ["GET"]
@@ -577,7 +577,7 @@ def test_a_task_closed_in_odoo_closes_its_issue(new_connector, ctx, odoo):
         result = new_connector().run()
         sent = [c.request for c in second_run.calls if c.request.method == "PATCH"]
 
-    assert result.details["outbound"] == {"updates": 1, "creates": 0, "sent": True}
+    assert result.details["outbound"] == {"updates": 1, "comments": 0, "creates": 0, "sent": True}
     assert len(sent) == 1
     pushed = json.loads(sent[0].body)
     assert pushed["state"] == "closed"
@@ -644,7 +644,7 @@ def test_an_issue_changed_upstream_is_not_echoed_back_in_the_same_run(new_connec
         result = new_connector().run()
 
     assert result.updated == 1
-    assert result.details["outbound"] == {"updates": 0, "creates": 0, "sent": False}
+    assert result.details["outbound"] == {"updates": 0, "comments": 0, "creates": 0, "sent": False}
     assert not [w for w in result.mock_writes if "PATCH" in w]
     assert [w for w in result.mock_writes if w.startswith("[MOCK WRITE] WRITE odoo://project.task")]
     # DRY_RUN describes the write instead of performing it.

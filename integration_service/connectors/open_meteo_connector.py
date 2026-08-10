@@ -145,12 +145,23 @@ class OpenMeteoConnector(BaseConnector):
         longitude = _coordinate(partner.get("partner_longitude"))
         self._check_coordinates(partner_id, latitude, longitude)
         if latitude == 0.0 and longitude == 0.0:
-            # Only reachable through OPEN_METEO_PARTNER_IDS; the geolocated domain
-            # excludes 0/0. Open-Meteo answers for it, so name it rather than fail.
-            result.add_note(
-                f"res.partner#{partner_id} has no coordinates (0, 0); the forecast stored "
-                "for it is the one for latitude 0 / longitude 0."
+            self.withhold_for_approval(
+                external_id=f"res.partner#{partner_id}",
+                summary=f"Approval Required: Incomplete Geolocation for Contact #{partner_id}",
+                note=f"Contact '{partner.get('name')}' (ID {partner_id}) has no valid coordinates to fetch weather forecast.",
+                reason=(
+                    "Required source values are missing: partner_latitude and partner_longitude "
+                    "are both 0, which Open-Meteo cannot distinguish from an unset location."
+                ),
+                required_action=(
+                    "Set the contact's latitude and longitude on the Contact form "
+                    "(or remove it from OPEN_METEO_PARTNER_IDS), then re-run the Open-Meteo sync."
+                ),
+                result=result,
+                anchor_model="res.partner",
+                anchor_id=partner_id,
             )
+            return {"action": "withheld"}
 
         days = self._fetch_days(result, partner_id, latitude, longitude)
         payload = json.dumps(days, sort_keys=True, separators=(",", ":"))

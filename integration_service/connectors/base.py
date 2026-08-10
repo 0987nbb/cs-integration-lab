@@ -171,4 +171,186 @@ class BaseConnector:
         return send()
 
 
+    # -- approval helper for incomplete mappings ----------------------------
+
+    def withhold_for_approval(
+        self,
+        external_id: str,
+        summary: str,
+        note: str,
+        result: SyncResult,
+        anchor_model: str = "res.users",
+        anchor_id: Optional[int] = None,
+        reason: Optional[str] = None,
+        required_action: str = "Complete the mapping in Odoo, then re-run the sync.",
+        count_skipped: bool = True,
+    ) -> Optional[int]:
+        """Withhold a write and raise a ``mail.activity`` for an administrator.
+
+        The record is *not* written: a half-mapped record in Odoo is worse than
+        an absent one, because nothing downstream can tell the two apart. The
+        activity is the durable half of that decision - it names the provider,
+        the upstream id, why the mapping is incomplete and what to do about it,
+        so a reviewer does not have to reconstruct any of that from the sync log.
+
+        It is idempotent on ``(anchor, summary)``: re-running a sync whose source
+        data is still incomplete finds the open activity and leaves it alone
+        rather than filing a duplicate every run.
+
+        ``count_skipped`` exists because some callers raise ``RecordSyncError``
+        afterwards, which charges the record to ``failed``. Counting it here as
+        well would report one bad record as two, and a log that says "1 skipped,
+        1 failed" for a single issue is not a log anyone can reconcile.
+        """
+        if count_skipped:
+            result.record_skipped(
+                reason=f"Incomplete mapping for {external_id}; write withheld awaiting approval: {summary}"
+            )
+        else:
+            result.add_note(
+                f"Incomplete mapping for {external_id}; write withheld awaiting approval: {summary}"
+            )
+        return self._raise_approval_activity(
+            external_id, summary, note, result, anchor_model, anchor_id,
+            reason, required_action, withheld=True,
+        )
+
+    def flag_for_approval(
+        self,
+        external_id: str,
+        summary: str,
+        note: str,
+        result: SyncResult,
+        anchor_model: str = "res.users",
+        anchor_id: Optional[int] = None,
+        reason: Optional[str] = None,
+        required_action: str = "Complete the mapping in Odoo, then re-run the sync.",
+    ) -> Optional[int]:
+        """Raise the same approval activity, but keep the record.
+
+        Used where the missing piece is a *link* rather than a required value -
+        a ticket whose author could not be resolved is still a usable ticket,
+        and discarding it would lose the report to keep the bookkeeping tidy.
+        The activity still gets filed, so the gap is not silent.
+        """
+        result.add_note(
+            f"Incomplete mapping for {external_id}; record imported without it, review raised: {summary}"
+        )
+        return self._raise_approval_activity(
+            external_id, summary, note, result, anchor_model, anchor_id,
+            reason, required_action, withheld=False,
+        )
+
+    def _raise_approval_activity(
+        self,
+        external_id: str,
+        summary: str,
+        note: str,
+        result: SyncResult,
+        anchor_model: str,
+        anchor_id: Optional[int],
+        reason: Optional[str],
+        required_action: str,
+        withheld: bool,
+    ) -> Optional[int]:
+        try:
+            user_id = self._resolve_approver_id()
+            if not anchor_id and anchor_model == "res.users":
+                anchor_id = user_id
+
+            if not anchor_id:
+                result.add_note(f"Approval activity for {external_id} could not be created: missing anchor_id.")
+                return None
+
+            existing = self.odoo.search_read(
+                "mail.activity",
+                [
+                    ["res_model", "=", anchor_model],
+                    ["res_id", "=", anchor_id],
+                    ["summary", "=", summary],
+                ],
+                fields=["id"],
+                limit=1,
+            )
+            if existing:
+                result.add_note(
+                    f"Approval activity for {external_id} already exists (id {existing[0]['id']}); not duplicated."
+                )
+                return existing[0]["id"]
+
+            res_model_id = self._model_id(anchor_model)
+            activity_type_id = self._activity_type_id()
+            if not res_model_id or not activity_type_id or not user_id:
+                result.add_note(f"Approval activity for {external_id} missing model/type/user; write withheld anyway.")
+                return None
+
+            vals = {
+                "res_model_id": res_model_id,
+                "res_model": anchor_model,
+                "res_id": anchor_id,
+                "activity_type_id": activity_type_id,
+                "user_id": user_id,
+                "summary": sanitize(summary),
+                "note": sanitize(
+                    self._approval_note(external_id, note, reason, required_action, withheld)
+                ),
+            }
+            if self.dry_run:
+                result.add_mock_write("CREATE", "odoo://mail.activity", vals)
+                return None
+            return self.odoo.create_one("mail.activity", vals)
+        except Exception as exc:
+            result.add_note(f"Approval activity creation error for {external_id}: {sanitize(exc)}. Write withheld anyway.")
+            return None
+
+    def _approval_note(self, external_id: str, note: str, reason: Optional[str],
+                       required_action: str, withheld: bool = True) -> str:
+        """Render the activity body a reviewer actually needs."""
+        outcome = (
+            "The record was <strong>not</strong> written to Odoo while this is open."
+            if withheld else
+            "The record <strong>was</strong> imported, but without the part named above."
+        )
+        return (
+            f"<p>{note}</p>"
+            "<ul>"
+            f"<li><strong>Provider:</strong> {self.label or self.provider}</li>"
+            f"<li><strong>Source / external id:</strong> {external_id}</li>"
+            f"<li><strong>Reason:</strong> {reason or 'Required mapping data is missing or unresolvable.'}</li>"
+            f"<li><strong>Required action:</strong> {required_action}</li>"
+            "</ul>"
+            f"<p>{outcome}</p>"
+        )
+
+    def _resolve_approver_id(self) -> Optional[int]:
+        """The configured approver login, else the lowest-id internal user."""
+        try:
+            login = getattr(self.settings, "approver_login", "") or ""
+            if login:
+                rows = self.odoo.search_read(
+                    "res.users", [["login", "=", login]], fields=["id"], limit=1
+                )
+                if rows:
+                    return rows[0]["id"]
+            rows = self.odoo.search_read("res.users", [["share", "=", False]], fields=["id"], limit=1, order="id asc")
+            return rows[0]["id"] if rows else None
+        except Exception:
+            return None
+
+    def _model_id(self, model: str) -> Optional[int]:
+        try:
+            rows = self.odoo.search_read("ir.model", [["model", "=", model]], fields=["id"], limit=1)
+            return rows[0]["id"] if rows else None
+        except Exception:
+            return None
+
+    def _activity_type_id(self) -> Optional[int]:
+        try:
+            rows = self.odoo.search_read("mail.activity.type", [], fields=["id"], limit=1, order="id asc")
+            return rows[0]["id"] if rows else None
+        except Exception:
+            return None
+
+
 __all__ = ["BaseConnector", "ConnectorContext", "build_context"]
+

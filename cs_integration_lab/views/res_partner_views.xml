@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        <!-- Partner Form View Extension for Weather Forecast -->
+        <record id="view_partner_form_weather_forecast" model="ir.ui.view">
+            <field name="name">res.partner.form.weather.forecast</field>
+            <field name="model">res.partner</field>
+            <field name="inherit_id" ref="base.view_partner_form"/>
+            <field name="arch" type="xml">
+                <xpath expr="//notebook" position="inside">
+                    <page string="Weather Forecast" name="weather_forecast">
+                        <group string="Next-Day Summary">
+                            <group>
+                                <field name="x_forecast_next_summary"/>
+                                <field name="x_forecast_next_date"/>
+                                <field name="x_forecast_updated_at"/>
+                            </group>
+                            <group>
+                                <field name="x_forecast_next_temp_max"/>
+                                <field name="x_forecast_next_temp_min"/>
+                            </group>
+                        </group>
+                        <group string="7-Day Raw Forecast (JSON)">
+                            <field name="x_forecast_payload"/>
+                        </group>
+                    </page>
+                </xpath>
+            </field>
+        </record>
+    </data>
+</odoo>

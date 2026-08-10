@@ -354,6 +354,18 @@ class FrankfurterConnector(BaseConnector):
 
         row = currencies.get(quote.code)
         if row is None:
+            self.withhold_for_approval(
+                external_id=quote.code,
+                summary=f"Approval Required: Unmapped Currency {quote.code}",
+                note=f"No res.currency record named '{quote.code}' exists in Odoo to store exchange rate.",
+                reason=f"Required relation cannot be resolved: no res.currency named {quote.code!r}.",
+                required_action=(
+                    "Create or un-archive the currency in Odoo (Accounting > Configuration > "
+                    "Currencies), then re-run the Frankfurter sync."
+                ),
+                result=result,
+                count_skipped=False,
+            )
             raise RecordSyncError(
                 f"No {CURRENCY_MODEL} named {quote.code} exists in Odoo; its rate cannot be stored.",
                 external_id=quote.code,

@@ -29,44 +29,80 @@ class IntegrationConfig(models.Model):
     ]
 
     def _check_manager_access(self):
-        """Ensure only Integration Managers can perform administrative actions."""
-        if not self.env.user.has_group('cs_integration_lab.group_integration_manager'):
-            raise AccessError(_("Only Integration Managers are allowed to trigger or modify integration synchronization."))
+        """Ensure users have access to perform integration actions."""
+        if not (self.env.user.has_group('cs_integration_lab.group_integration_manager') or self.env.user.has_group('base.group_system') or self.env.is_admin()):
+            raise AccessError(_("Only Integration Managers or Administrators can execute manual synchronisation or modify integration settings."))
+
 
     def action_sync_now(self):
         """
         Action triggered by 'Sync Now' button.
         Restricted to Integration Managers.
-        Creates a log entry indicating provider sync is not yet implemented.
+        Executes actual integration sync for the provider and records a detailed sync log.
         """
         self.ensure_one()
         self._check_manager_access()
 
-        now = fields.Datetime.now()
-        self.write({'last_sync_at': now})
+        start_time = fields.Datetime.now()
+        status = 'success'
+        error_details = False
+        created_count = 0
+        updated_count = 0
+        skipped_count = 0
+        failed_count = 0
 
-        # Create a foundation log entry without executing fake API calls
+        try:
+            from integration_service.cli import CONNECTORS
+            from integration_service.connectors.base import build_context
+            from integration_service.config import get_settings
+
+            settings = get_settings()
+            ctx = build_context(settings=settings)
+            connector_cls = CONNECTORS.get(self.provider)
+            if connector_cls:
+                connector = connector_cls(ctx)
+                res = connector.run(write_log=False)
+                created_count = res.created
+                updated_count = res.updated
+                skipped_count = res.skipped
+                failed_count = res.failed
+                status = res.status
+                if res.errors:
+                    error_details = "\n".join(res.errors)
+            else:
+                status = 'failed'
+                error_details = _("Unknown provider '%s'") % self.provider
+        except Exception as exc:
+            status = 'failed'
+            error_details = str(exc)
+
+        end_time = fields.Datetime.now()
+        self.write({'last_sync_at': end_time})
+
         log = self.env['cs.integration.sync.log'].create({
             'name': self.env['ir.sequence'].next_by_code('cs.integration.sync.log') or _('Sync Log'),
             'provider': self.provider,
-            'start_time': now,
-            'end_time': now,
-            'status': 'skipped',
-            'created_count': 0,
-            'updated_count': 0,
-            'skipped_count': 1,
-            'failed_count': 0,
-            'error_details': _("Sync Now triggered for provider '%s'. Provider-specific synchronization logic is not yet implemented.") % self.provider,
+            'start_time': start_time,
+            'end_time': end_time,
+            'status': status,
+            'created_count': created_count,
+            'updated_count': updated_count,
+            'skipped_count': skipped_count,
+            'failed_count': failed_count,
+            'error_details': error_details,
             'config_id': self.id,
         })
 
+        msg_type = 'success' if status == 'success' else ('warning' if status == 'partial' else 'danger')
         return {
             'type': 'ir.actions.client',
             'tag': 'display_notification',
             'params': {
-                'title': _("Sync Triggered"),
-                'message': _("Sync action initialized for %s. Log entry created (ID: %s).") % (self.provider, log.name),
-                'type': 'info',
+                'title': _("Sync Completed (%s)") % status.upper(),
+                'message': _("Sync executed for %s (Created: %s, Updated: %s, Skipped: %s, Failed: %s). Log: %s") % (
+                    self.provider, created_count, updated_count, skipped_count, failed_count, log.name
+                ),
+                'type': msg_type,
                 'sticky': False,
             }
         }
@@ -81,16 +117,5 @@ class IntegrationConfig(models.Model):
             ('schedule_enabled', '=', True)
         ])
         for config in active_configs:
-            # Reusable hook for provider cron trigger
-            now = fields.Datetime.now()
-            config.write({'last_sync_at': now})
-            self.env['cs.integration.sync.log'].create({
-                'name': self.env['ir.sequence'].next_by_code('cs.integration.sync.log') or _('Sync Log'),
-                'provider': config.provider,
-                'start_time': now,
-                'end_time': now,
-                'status': 'skipped',
-                'skipped_count': 1,
-                'error_details': _("Scheduled cron executed for provider '%s'. Integration pending implementation.") % config.provider,
-                'config_id': config.id,
-            })
+            config.action_sync_now()
+

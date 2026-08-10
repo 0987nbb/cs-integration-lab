@@ -29,6 +29,7 @@ from .json2_proof import run_proof
 from .provisioning import provision
 from .sanitize import sanitize
 from .scheduler import Scheduler
+from .sync_request import SyncRequestWorker
 from .sync_result import STATUS_FAILED, STATUS_PARTIAL, SyncResult
 
 CONNECTORS: Dict[str, Type[BaseConnector]] = {
@@ -90,6 +91,19 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--show-schedule", action="store_true",
         help="Print the resolved schedule and exit without running anything.",
+    )
+    parser.add_argument(
+        "--drain-requests", action="store_true",
+        help="Run every Sync Now request currently queued in Odoo, then exit. "
+             "This is what turns the in-Odoo button into a real provider sync.",
+    )
+    parser.add_argument(
+        "--serve-requests", action="store_true",
+        help="Poll Odoo for Sync Now requests and fulfil them until interrupted.",
+    )
+    parser.add_argument(
+        "--poll-seconds", type=int, default=10,
+        help="With --serve-requests: seconds between queue polls (default 10).",
     )
     parser.add_argument(
         "--json", action="store_true",
@@ -171,6 +185,34 @@ def main(argv: Optional[List[str]] = None) -> int:
         }
         print(json.dumps(report, indent=2))
         return 0
+
+    if args.drain_requests or args.serve_requests:
+        worker = SyncRequestWorker(
+            ctx.odoo,
+            runner=lambda name: CONNECTORS[name](ctx).run(write_log=not args.no_sync_log),
+        )
+        if args.serve_requests:
+            try:
+                worker.serve_forever(poll_seconds=args.poll_seconds)
+            except KeyboardInterrupt:
+                print("Worker stopped.", file=sys.stderr)
+            return 0
+        try:
+            reports = worker.drain()
+        except IntegrationError as exc:
+            print(f"Could not read the request queue: {sanitize(exc)}", file=sys.stderr)
+            return 3
+        if args.json:
+            print(json.dumps(reports, indent=2, default=str))
+        elif not reports:
+            print("No sync was requested; nothing to do.")
+        else:
+            for report in reports:
+                print(f"  {report.get('provider')}: {report.get('status')} - {report.get('summary', report)}")
+        statuses = {r.get("status") for r in reports}
+        if STATUS_FAILED in statuses:
+            return 2
+        return 1 if STATUS_PARTIAL in statuses else 0
 
     providers = RUN_ORDER if args.provider == "all" else [args.provider]
 

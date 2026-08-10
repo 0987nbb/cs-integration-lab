@@ -118,6 +118,10 @@ class JsonPlaceholderConnector(BaseConnector):
         #: upstream ``user.id`` -> Odoo ``res.partner`` id, built by the users
         #: pass so the posts pass never queries per post.
         self._partner_by_user_id: Dict[int, int] = {}
+        #: Every ``user.id`` this run saw on /users. A dry run creates no
+        #: partner, so without this every post would look authorless and raise
+        #: a review that a real run would never have raised.
+        self._seen_user_ids: set = set()
 
     # -- template method ----------------------------------------------------
 
@@ -191,6 +195,7 @@ class JsonPlaceholderConnector(BaseConnector):
             with self.guard(result, external_id=external_id, label="user"):
                 if external_id is None:
                     raise RecordSyncError(f"Skipped a /users entry without an id: {truncate(user, 120)}")
+                self._seen_user_ids.add(_as_int(user.get("id"), 0))
                 vals = self._map_user(user, result, external_id)
                 _outcome, partner_id = upserter.upsert(external_id, vals)
                 if partner_id:
@@ -312,7 +317,7 @@ class JsonPlaceholderConnector(BaseConnector):
             with self.guard(result, external_id=external_id, label="post"):
                 if external_id is None:
                     raise RecordSyncError(f"Skipped a /posts entry without an id: {truncate(post, 120)}")
-                upserter.upsert(external_id, self._map_post(post, model, team_id, external_id))
+                upserter.upsert(external_id, self._map_post(post, model, team_id, external_id, result=result))
 
         result.details["posts"] = {
             "source": url,
@@ -365,11 +370,69 @@ class JsonPlaceholderConnector(BaseConnector):
         model: str,
         team_id: Optional[int],
         external_id: str,
+        result: Optional[SyncResult] = None,
     ) -> Dict[str, Any]:
+        user_id = _as_int(post.get("userId"), 0)
+        partner_id = self._partner_by_user_id.get(user_id) if user_id else None
+        if user_id and not partner_id and self.odoo:
+            user_ext_id = make_external_id(PROVIDER, "user", user_id)
+            try:
+                rows = self.odoo.search_read("res.partner", [["x_external_id", "=", user_ext_id]], fields=["id"], limit=1)
+                if rows:
+                    partner_id = int(rows[0]["id"])
+                    self._partner_by_user_id[user_id] = partner_id
+            except Exception:
+                pass
+
+        # Two different kinds of "incomplete", which deserve two different
+        # outcomes. The previous version keyed on `incomplete_mapping` /
+        # `require_partner_approval` - fields JSONPlaceholder never sends, so
+        # only a test could set them and neither real case was ever detected.
+        #
+        # A missing title is disqualifying: the ticket's name would fall back to
+        # the external id, which is not a subject anyone can triage.
+        if not _text(post.get("title")) and result is not None:
+            self.withhold_for_approval(
+                external_id=external_id,
+                summary=f"Approval Required: Incomplete Mapping for Post #{post.get('id')}",
+                note=f"Post #{post.get('id')} cannot be mapped onto a {model} record.",
+                reason="required source field 'title' is empty",
+                required_action="Correct the post upstream, then re-run the sync.",
+                result=result,
+                count_skipped=False,
+            )
+            raise RecordSyncError(
+                f"Post #{post.get('id')} withheld for approval: required field 'title' is empty.",
+                external_id=external_id,
+            )
+
+        # An unresolvable author is a missing *link*, not a missing value. The
+        # ticket is still worth having, so it is imported unlinked and the gap is
+        # raised for review instead of thrown away. In a dry run nothing was
+        # created, so an author this run would have created is not a real gap.
+        if user_id and not partner_id and result is not None:
+            would_have_been_created = self.dry_run and user_id in self._seen_user_ids
+            if not would_have_been_created:
+                self.flag_for_approval(
+                    external_id=external_id,
+                    summary=f"Approval Required: Unresolved Author for Post #{post.get('id')}",
+                    note=f"Post #{post.get('id')} was imported without a customer link.",
+                    reason=(
+                        f"userId {user_id} does not resolve to a res.partner "
+                        f"(expected x_external_id {make_external_id(PROVIDER, 'user', user_id)})"
+                    ),
+                    required_action=(
+                        "Run the JSONPlaceholder user sync so the author exists as a contact, "
+                        "then re-run this sync to attach it."
+                    ),
+                    result=result,
+                )
+
         vals: Dict[str, Any] = {
             "name": _text(post.get("title")) or external_id,
             "description": _html_paragraph(post.get("body")),
         }
+
         if model != "helpdesk.ticket":
             # project.task requires a state from its own selection.
             vals["state"] = "01_in_progress"
@@ -378,7 +441,6 @@ class JsonPlaceholderConnector(BaseConnector):
         vals["kanban_state"] = "normal"
         if team_id:
             vals["team_id"] = team_id
-        partner_id = self._partner_by_user_id.get(_as_int(post.get("userId"), 0))
         if partner_id:
             vals["partner_id"] = partner_id
         return vals

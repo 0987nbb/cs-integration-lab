@@ -5,9 +5,12 @@
 | Symptom | Cause | Fix |
 |---|---|---|
 | `Startup failed: Missing required Odoo settings` | `.env` absent or incomplete | `cp .env.example .env`, set `ODOO_URL`, `ODOO_DATABASE`, `ODOO_API_KEY` |
-| Sync log says `-> logs/sync_log.jsonl` | No access rule on `x_integration_sync_log` | [§1](#1-http-403-on-the-custom-models) |
-| `You are not allowed to access ... No group currently allows this operation` | Same as above | [§1](#1-http-403-on-the-custom-models) |
-| `the model 'ir.model.access' does not exist` (404) | Security models are not on the JSON-2 route | [§1](#1-http-403-on-the-custom-models) — not fixable from code |
+| Sync log says `-> logs/sync_log.jsonl` | No access rule on `x_integration_sync_log` | [§1](#1-http-403-on-the-custom-models) — `--provision` |
+| `You are not allowed to access ... No group currently allows this operation` | Same as above | [§1](#1-http-403-on-the-custom-models) — `--provision` |
+| `the model 'ir.model.access' does not exist` (404) | Odoo 19 replaced it with `ir.access` | [§1](#1-http-403-on-the-custom-models) |
+| Sync Now says "Sync Requested" but nothing happens | No worker is draining the queue | Run `--drain-requests` (once) or `--serve-requests` (resident) |
+| `Invalid field mail.message.res_model` (500) | Odoo 19 names it `model` | Fixed in the GitHub connector; check any custom domain you added |
+| `forbidden opcode(s)` / `Access to forbidden name '__name__'` | `safe_eval` rejects `try`/`except` and dunders in server-action code | Write provisioning action bodies without them |
 | `call_kw Odoo error: user is not connected` | `/web/dataset/call_kw` needs a session cookie | [§2](#2-user-is-not-connected) |
 | JSONPlaceholder run takes ~60 s before working | Primary host unreachable, fallback used | [§3](#3-apijsonplaceholderdev-times-out) |
 | Nager.Date run reports `skipped`, nothing imported | Provider has no data for that country | [§4](#4-nagerdate-returns-204-no-content) |
@@ -38,48 +41,53 @@ WARNING integration_service.sync_log: Cannot write to x_integration_sync_log
 ```
 
 **Cause.** `x_integration_config` and `x_integration_sync_log` are *manual*
-models. Odoo grants no implicit access to a manual model — an `ir.model.access`
-row must exist. None does on this database.
+models. Odoo grants no implicit access to a manual model — an access rule must
+exist.
 
-**Why it cannot be automated.** `ir.model.access` and `ir.rule` are not exposed
-on the JSON-2 route. Requesting them returns:
+**Fix**
+
+```bash
+python -m integration_service.cli --provision
+```
+
+`ensure_security` creates the **Integration Manager** group (stable external id
+`cs_integration_lab.group_integration_manager`), grants it CRUD on both models,
+withdraws any wider non-standard grant, and puts the group in front of the
+menus, the window actions and the Sync Now action. Then:
+
+```bash
+python -m integration_service.cli --check     # both models should read "ok"
+```
+
+> **Correction to earlier revisions.** This section used to say the rule "cannot
+> be automated" because `ir.model.access` returns 404 on the JSON-2 route. That
+> was a misdiagnosis. **Odoo 19 replaced `ir.model.access` and `ir.rule` with a
+> single `ir.access` model.** The old names 404 because they no longer exist in
+> the registry — not because the route hides them. `ir.access` is readable and
+> writable over JSON-2, so no manual click-path is required. A rule there carries
+> `kind` (`permission` / `restriction`) and `operation` (`crud`, `r`, …) instead
+> of the four `perm_*` booleans.
+
+To confirm who can actually do what — the check that matters, rather than reading
+a rule table:
+
+```python
+from integration_service.odoo_client.client import OdooClient
+from integration_service.provisioning import verify_access
+for line in verify_access(OdooClient())["users"]:
+    print(line)
+```
+
+which evaluates `has_access` per user and prints, e.g.:
 
 ```
-Odoo API error (HTTP 404): the model 'ir.model.access' does not exist
+manager@example.com | manager=True  | config read=True  write=True  create=True  | ...
+someone@example.com | manager=False | config read=False write=False create=False | ...
 ```
 
-`ir.model` and `ir.model.fields` *are* reachable (which is how custom fields are
-provisioned), but the two security models are not. There is no API path to
-creating the rule, so it is a one-time manual step.
-
-**Fix — in the Odoo web UI**
-
-1. Enable developer mode: **Settings** → scroll to the bottom → **Developer
-   Tools** → **Activate the developer mode**.
-2. Go to **Settings** → **Technical** → **Security** → **Access Rights**.
-3. **New**, then for each of the two models:
-
-   | Field | Value |
-   |---|---|
-   | Name | `x_integration_sync_log.full` |
-   | Object | `Integration Sync Log (x_integration_sync_log)` |
-   | Group | *(leave empty for all users, or pick e.g. Administration / Settings)* |
-   | Read / Write / Create / Delete | all checked |
-
-4. Repeat with Object = `Integration Configuration (x_integration_config)`.
-5. Verify:
-
-   ```bash
-   python -m integration_service.cli --check
-   ```
-
-   Both entries should now read `"ok"`.
-
-Nothing else changes: the next run writes its record into
-`x_integration_sync_log` instead of the file, with no code change.
-
-**Meanwhile.** The audit trail is not lost. `logs/sync_log.jsonl` holds one JSON
-object per run with the same fields:
+**If the write still fails.** The audit trail is not lost — `logs/sync_log.jsonl`
+holds one JSON object per run with the same fields, and the run itself carries a
+note saying the log went there instead of Odoo:
 
 ```bash
 python -c "import json;[print(json.loads(l)['provider'], json.loads(l)['status'], json.loads(l)['created']) for l in open('logs/sync_log.jsonl')]"

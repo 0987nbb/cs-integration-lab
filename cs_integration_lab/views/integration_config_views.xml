@@ -7,6 +7,9 @@
             <field name="model">cs.integration.config</field>
             <field name="arch" type="xml">
                 <list string="Integration Configurations">
+                    <header>
+                        <button name="action_sync_now" string="Sync Now" type="object" class="btn-primary" groups="cs_integration_lab.group_integration_manager"/>
+                    </header>
                     <field name="name"/>
                     <field name="provider"/>
                     <field name="active"/>
@@ -61,6 +64,20 @@
                 <p>
                     Configure external integrations for GitHub, JSONPlaceholder, Frankfurter, Open-Meteo, or Nager.Date.
                 </p>
+            </field>
+        </record>
+
+        <!-- Server Action for Sync Now in Action Dropdown Menu -->
+        <record id="action_server_cs_integration_sync_now" model="ir.actions.server">
+            <field name="name">Sync Now</field>
+            <field name="model_id" ref="model_cs_integration_config"/>
+            <field name="binding_model_id" ref="model_cs_integration_config"/>
+            <field name="binding_view_types">list,form</field>
+            <field name="groups_id" eval="[(4, ref('cs_integration_lab.group_integration_manager'))]"/>
+            <field name="state">code</field>
+            <field name="code">
+for record in records:
+    record.action_sync_now()
             </field>
         </record>
     </data>

@@ -215,51 +215,94 @@ One `x_integration_sync_log` record per run: provider, start/end time, the four
 counters, status, and sanitised error details, linked to `x_integration_config`
 when that row is readable.
 
-On this database both custom models answer **HTTP 403** — no access rule grants
-the API key access to them — and `ir.model.access` is **not exposed** on the
-JSON-2 route (HTTP 404), so the rule cannot be created from code. Rather than
-lose the audit trail, `SyncLogWriter` writes the identical record as one JSON
-object per line to `logs/sync_log.jsonl` and warns once. When the rule is added
-in the Odoo UI (see [troubleshooting.md](troubleshooting.md)), logs start landing
-in Odoo with no code change.
+`SyncLogWriter` still degrades to `logs/sync_log.jsonl` if the write fails, and
+says so on the run, so a log that did not reach Odoo never looks like one that
+did. It is a fallback, not the normal path: provisioning installs the access rule
+the model needs (§10).
 
-## 9. Scheduling
+> **Superseded.** Earlier revisions of this document said both custom models
+> answer HTTP 403 and that the rule "cannot be created from code" because
+> `ir.model.access` is not routed. The second half was a misreading of a 404.
+> Odoo 19 merged `ir.model.access` and `ir.rule` into a single **`ir.access`**
+> model — the old names 404 because they no longer exist, not because the route
+> withholds them. `ir.access` *is* reachable over JSON-2, so the rules are
+> provisioned like everything else.
 
-Odoo Online cannot run this code, so `ir.cron` is not available and the schedule
-lives in the service.
+## 9. Sync Now: the request queue
 
-* **Sync Now** — `--provider <name>` runs immediately, ignoring the schedule.
+Odoo Online evaluates server-action code under `safe_eval`: no `import`, no
+socket, no `requests`. Odoo therefore cannot call GitHub or Frankfurter itself,
+and a button that reported "Sync Completed" from inside Odoo would be reporting
+something it is structurally incapable of doing.
+
+So the button enqueues, and says that is what it did:
+
+```
+        Odoo UI                         integration_service
+  ┌──────────────────┐
+  │ Sync Now (886)   │  x_sync_state = requested
+  │ ir.actions.server│ ─────────────────────────────▶ ┌─────────────────────┐
+  └──────────────────┘                                 │ SyncRequestWorker   │
+                                                       │  --drain-requests   │
+        idle ◀── done/failed ◀── real counters ────────│  --serve-requests   │
+                                 real x_integration_   └─────────┬───────────┘
+                                 sync_log record                 │
+                                                          real provider API
+```
+
+`_claim` is a compare-and-set: the worker writes `running`, re-reads the row, and
+only proceeds if the state it reads back is its own, so two workers racing for
+one request cannot both run it. A connector that raises still releases the row —
+otherwise one crash would leave Sync Now permanently dead for that provider.
+
+## 9a. Scheduling
+
 * **Resident** — `--schedule` keeps the process alive, running each provider on
   its own `SCHEDULE_<PROVIDER>_MINUTES` interval, sleeping in 5-second slices so
   SIGINT/SIGTERM is honoured promptly.
 * **One-shot** — `--schedule --once` runs only what is currently due and exits;
   this is the form cron or Windows Task Scheduler should invoke.
+* **On demand** — `--provider <name>` runs immediately, ignoring the schedule.
 
 Due times advance by whole intervals rather than `now + interval`, so a slow run
-or a suspended machine does not drift the cadence. When `x_integration_config`
-becomes readable, `x_schedule_enabled` disables a provider and `x_last_sync_at` /
-`x_next_sync_at` are kept current so the schedule is visible inside Odoo.
+or a suspended machine does not drift the cadence.
 
 ## 10. Schema provisioning
 
-`--provision` creates missing custom fields as *manual* `ir.model.fields` records
-— the same mechanism that produced the pre-existing `x_external_id` columns. It
-is idempotent: every field is checked before it is created.
+`--provision` brings a database — including an empty one — to the expected state,
+and every step is individually idempotent, so a second run writes nothing.
 
-Only fields on **existing** models are provisioned. Creating a manual *model* was
-tested and rejected: a new manual model has no access rule, and because
-`ir.model.access` is unreachable over JSON-2 the model would be unreadable by
-this very service (verified — HTTP 403 on a freshly created probe model). That is
-why the 7-day forecast lives in columns on `res.partner`, which already has
-working access rules, rather than in a child model.
+| Step | Creates |
+|---|---|
+| `ensure_integration_models` | `x_integration_config`, `x_integration_sync_log` and every column, selection values included |
+| `ensure_partner_forecast_fields` | the six `x_forecast_*` columns on `res.partner` |
+| `ensure_idempotency_fields` | `x_external_id` / `x_source_hash` / `x_external_updated_at` on the four integrated models |
+| `ensure_partner_forecast_view` | the Contact form page, inheriting `base.view_partner_form` |
+| `ensure_integration_config_views` | the **Sync Now** server action |
+| `ensure_integration_config_records` | one config row per provider, keyed on `x_provider` |
+| `ensure_menus` | the CS Integration Lab menu and its two actions |
+| `ensure_security` | the Integration Manager group, its `ir.access` rules, and the group restriction on every menu/action |
+
+Manual *models* are created here, which an earlier revision claimed was
+impossible. The original conclusion — "a manual model has no access rule and the
+rule cannot be created, so the model is unreadable" — was correct in its first
+half and wrong in its second; with `ir.access` writable the model is perfectly
+usable. The 7-day forecast still lives in `res.partner` columns rather than a
+child model, but now because a column is the simpler mapping, not because a model
+was unreachable.
+
+`ensure_security` runs its rules through a named server action
+(`CS Integration Lab: Provision Security`) rather than direct writes, because it
+needs `env.user` — the account this service authenticates as is added to the
+group *before* any broader grant is withdrawn, so the integration cannot lock
+itself out. The body is a constant; no caller-supplied code is executed.
 
 ## 11. Known constraints and trade-offs
 
 | Constraint | Consequence | Response |
 |---|---|---|
-| `ir.model.access` / `ir.rule` are not on the JSON-2 route (404) | Access rules cannot be provisioned from code | Documented click-path; file fallback for sync logs |
-| `x_integration_config` / `x_integration_sync_log` return 403 | No sync log in Odoo yet | `logs/sync_log.jsonl`, same record shape |
-| No manual model can be created usefully | No `x_partner_forecast` child model | Forecast stored in `res.partner` columns; full 7 days as canonical JSON in `x_forecast_payload` |
+| `safe_eval` forbids `import`, sockets, `try`/`except` and dunders | Odoo cannot call a provider, and provisioning code cannot catch its own errors | Sync Now enqueues; the worker runs the provider; a provisioning failure surfaces as Odoo's own traceback and rolls back |
+| Inbound is authoritative on conflict | An Odoo-side edit made while the same issue also changed on GitHub is overwritten on the next run | Documented; the Odoo change must be re-applied. Only same-record, same-window collisions are affected |
 | `api.jsonplaceholder.dev` does not resolve | The endpoint named in the brief is unreachable | Probed first, then `jsonplaceholder.typicode.com`, with a note on the run |
 | Nager.Date has no data for some countries (PK) | HTTP 204 | Counted as skipped with a note, never failed |
 | Company currency is PKR, API base is USD | Raw API rates are not Odoo rates | Rebased with `Decimal`; see [data_mapping.md](data_mapping.md) |

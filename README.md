@@ -41,7 +41,8 @@ cp .env.example .env            # then fill in ODOO_URL / ODOO_DATABASE / ODOO_A
 # 1. Confirm connectivity and per-model access
 python -m integration_service.cli --check
 
-# 2. Create any missing custom field on res.partner (idempotent)
+# 2. Bring the database to the expected state - models, fields, views, menus,
+#    the Sync Now action and the security rules. Idempotent; safe on a fresh trial.
 python -m integration_service.cli --provision
 
 # 3. Prove Odoo JSON-2 CREATE / READ / UPDATE / DELETE
@@ -50,9 +51,26 @@ python -m integration_service.cli --proof
 # 4. Rehearse without writing anything
 python -m integration_service.cli --provider all --dry-run
 
-# 5. Run for real  ("Sync Now")
+# 5. Run for real
 python -m integration_service.cli --provider all
 ```
+
+### Sync Now from inside Odoo
+
+**CS Integration Lab ▸ Integrations**, select an integration, **Actions ▸ Sync
+Now**. Odoo Online cannot make an outbound HTTP call from a server action, so the
+button *requests* a sync (`x_sync_state = requested`) rather than pretending to
+have performed one. A worker outside Odoo fulfils it:
+
+```bash
+python -m integration_service.cli --drain-requests    # run what is queued, exit
+python -m integration_service.cli --serve-requests    # poll and fulfil, resident
+```
+
+The worker calls the real provider API, writes a real `x_integration_sync_log`
+record, and writes the outcome back onto the integration row (`Completed` /
+`Failed` plus the counters). Both menus and the action itself are restricted to
+the **Integration Manager** group.
 
 Run one connector at a time with `--provider github|jsonplaceholder|frankfurter|open_meteo|nager_date`.
 
@@ -85,7 +103,8 @@ integration_service/          External service (this is the deliverable)
   idempotency.py              x_external_id / x_source_hash upsert engine
   sync_result.py              created/updated/skipped/failed counters, timing, status
   sync_logger.py              Writes x_integration_sync_log, falls back to logs/sync_log.jsonl
-  provisioning.py             Idempotent custom-field creation + access probing
+  sync_request.py             The Sync Now queue: the in-Odoo action body + the worker that fulfils it
+  provisioning.py             Idempotent models, fields, views, menus, config rows and ir.access rules
   scheduler.py                Per-provider intervals; resident and one-shot modes
   json2_proof.py              Executable CREATE/READ/UPDATE/DELETE proof
   odoo_client/client.py       Odoo 19 JSON-2 API client
@@ -132,7 +151,8 @@ These were verified against the live instance and are handled in code rather tha
 
 | Constraint | Effect | Handling |
 |---|---|---|
-| `x_integration_config` / `x_integration_sync_log` return **HTTP 403** — no access rule exists, and `ir.model.access` is not exposed on the JSON-2 route (HTTP 404) | Sync logs cannot be written to Odoo until a rule is added in the UI | `SyncLogWriter` falls back to `logs/sync_log.jsonl`; no code change needed once the rule exists. Click-path in [docs/troubleshooting.md](docs/troubleshooting.md) |
+| Odoo 19 replaced `ir.model.access` / `ir.rule` with **`ir.access`** — the old names 404 because they no longer exist | Earlier revisions concluded access rules "cannot be provisioned from code". They can | `ensure_security` writes `ir.access` rules over JSON-2; `--provision` installs the group, the rules and the menu restrictions |
+| Odoo Online runs server actions under `safe_eval`: no `import`, no sockets | Odoo cannot call a provider itself, so a "Sync Now" that reports success from inside Odoo is lying | Sync Now **enqueues** (`x_sync_state = requested`); `--drain-requests` / `--serve-requests` runs the real provider and writes the real log |
 | `/web/dataset/call_kw` rejects API-key auth (`user is not connected`) | Only `/json/2/` is usable | `OdooClient.call_kw` raises with that explanation; all traffic goes through `_request` |
 | `api.jsonplaceholder.dev` does not resolve | The endpoint named in the brief is unreachable | Connector probes it first, then falls back to `jsonplaceholder.typicode.com` and records a note |
 | Nager.Date has no data for some countries (e.g. `PK`) and answers **HTTP 204** | No holidays to import | Counted as `skipped` with a note — not a failure |

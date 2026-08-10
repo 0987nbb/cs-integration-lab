@@ -234,7 +234,7 @@ class NagerDateConnector(BaseConnector):
 
         for item, external_id in prepared:
             with self.guard(result, external_id=external_id, label="holiday"):
-                outcome, _record_id = self._sync_holiday(upserter, country_code, item, external_id)
+                outcome, _record_id = self._sync_holiday(upserter, country_code, item, external_id, result)
                 bucket[outcome] += 1
 
     # -- one holiday ---------------------------------------------------------
@@ -245,9 +245,10 @@ class NagerDateConnector(BaseConnector):
         country_code: str,
         item: Any,
         external_id: Optional[str],
+        result: SyncResult,
     ) -> Tuple[str, Optional[int]]:
         """Map and upsert one holiday, raising :class:`RecordSyncError` on bad input."""
-        name, day = self._validated(item, external_id)
+        name, day = self._validated(item, external_id, result)
         vals = {
             "name": f"{name} ({_scope_label(item, country_code)})",
             "start": f"{day} {DAY_START}",
@@ -258,10 +259,16 @@ class NagerDateConnector(BaseConnector):
         }
         # external_updated_at stays None: the feed carries no modification time,
         # so the hash over these values is the only change detector available.
-        return upserter.upsert(external_id, vals, external_updated_at=None)
+        return upserter.upsert(external_id, vals)
 
-    @staticmethod
-    def _validated(item: Any, external_id: Optional[str]) -> Tuple[str, str]:
+    # -- validation ----------------------------------------------------------
+
+    def _validated(
+        self,
+        item: Any,
+        external_id: Optional[str],
+        result: Optional[SyncResult] = None,
+    ) -> Tuple[str, str]:
         """Return ``(name, YYYY-MM-DD)``, or raise for a row that cannot be mapped.
 
         Every rejection here is a per-record failure: a holiday without a usable
@@ -279,6 +286,14 @@ class NagerDateConnector(BaseConnector):
         raw_date = _text(item.get("date"))
         missing = [field for field, value in (("date", raw_date), ("name", name)) if not value]
         if missing:
+            if result is not None and external_id:
+                self.withhold_for_approval(
+                    external_id=external_id,
+                    summary=f"Approval Required: Incomplete Holiday Mapping for {external_id}",
+                    note=f"Holiday object is missing required field(s): {', '.join(missing)}.",
+                    result=result,
+                    count_skipped=False,
+                )
             raise RecordSyncError(
                 f"Holiday is missing required field(s) {', '.join(missing)}: "
                 f"{truncate(item, 120)}.",

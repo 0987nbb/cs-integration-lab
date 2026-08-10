@@ -1,24 +1,24 @@
 # -*- coding: utf-8 -*-
 """Persist a :class:`SyncResult` to ``x_integration_sync_log``.
 
-The custom models on the target instance currently have **no access rule**, so
-the JSON-2 API answers HTTP 403 for them, and ``ir.model.access`` is not exposed
-on that route either (HTTP 404) - meaning the rule cannot be created from code.
-Rather than lose the audit trail, the writer degrades:
+The model is provisioned by :mod:`integration_service.provisioning`, together
+with the access rule that makes it reachable. The writer still degrades rather
+than lose an audit trail, because a run that cannot record itself is worse than
+a run that records itself somewhere else:
 
 1. try ``x_integration_sync_log`` in Odoo;
 2. on failure, append the same record as one JSON object per line to
    ``SYNC_LOG_FALLBACK_PATH``.
 
-Once an access rule is added in Odoo (docs/troubleshooting.md), logs start
-landing in Odoo with no code change.
+A fallback write is announced on the result as a note, so a run whose log did
+not reach Odoo never looks like one that did.
 """
 from __future__ import annotations
 
 import json
 import logging
 import os
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from .config import Settings, get_settings
 from .errors import OdooError
@@ -47,9 +47,11 @@ class SyncLogWriter:
         self.settings = settings or get_settings()
         self.fallback_path = fallback_path or self.settings.sync_log_fallback_path
         self._odoo_available: Optional[bool] = None
-        self._config_ids: Dict[str, Optional[int]] = {}
+        self._config_ids: Dict[str, Tuple[Optional[int], Optional[str]]] = {}
         #: True once the operator has been told Odoo logging is unavailable.
         self._warned = False
+        #: Why the last Odoo write failed, quoted back on the result.
+        self._last_error: Optional[str] = None
 
     # -- public API ---------------------------------------------------------
 
@@ -98,56 +100,59 @@ class SyncLogWriter:
             return False
 
         payload = dict(record)
-        config_id = self._config_id_for(record["x_provider"])
+        config_id, config_model = self._config_id_for(record["x_provider"])
         if config_id:
+            # Linking the run to its configuration is what makes the Sync Logs
+            # list filterable by integration rather than only by provider name.
             payload["x_config_id"] = config_id
 
         try:
             new_id = self.client.create_one(SYNC_LOG_MODEL, payload)
+            if new_id:
+                self._odoo_available = True
+                if config_id:
+                    self._touch_config(config_id, config_model, record["x_end_time"])
+                return True
         except OdooError as exc:
-            self._odoo_available = False
-            reason = (
-                "no access rule grants this API key access to it"
-                if exc.is_access_error
-                else sanitize(exc)
+            self._last_error = sanitize(exc)
+
+        self._odoo_available = False
+        reason = getattr(self, "_last_error", None) or "sync log model is not writable"
+        if not self._warned:
+            LOGGER.warning(
+                "Cannot write to sync log model (%s). Falling back to %s.",
+                reason, self.fallback_path,
             )
-            if not self._warned:
-                LOGGER.warning(
-                    "Cannot write to %s (%s). Falling back to %s. "
-                    "See docs/troubleshooting.md to grant access.",
-                    SYNC_LOG_MODEL, reason, self.fallback_path,
-                )
-                self._warned = True
-            result.add_note(f"Sync log written to {self.fallback_path} instead of Odoo: {reason}")
-            return False
+            self._warned = True
+        result.add_note(f"Sync log written to {self.fallback_path} instead of Odoo: {reason}")
+        return False
 
-        self._odoo_available = True
-        if config_id:
-            self._touch_config(config_id, record)
-        return bool(new_id)
-
-    def _config_id_for(self, provider: str) -> Optional[int]:
-        """Resolve the ``x_integration_config`` row for a provider, if readable."""
+    def _config_id_for(self, provider: str) -> Tuple[Optional[int], Optional[str]]:
+        """Resolve the integration config row for a provider, if readable."""
         if provider in self._config_ids:
             return self._config_ids[provider]
-        config_id: Optional[int] = None
+
+        res: Tuple[Optional[int], Optional[str]] = (None, None)
         try:
             rows = self.client.search_read(
                 CONFIG_MODEL, [["x_provider", "=", provider]], fields=["id"], limit=1
             )
             if rows:
-                config_id = rows[0]["id"]
-        except OdooError:
-            config_id = None
-        self._config_ids[provider] = config_id
-        return config_id
-
-    def _touch_config(self, config_id: int, record: Dict[str, Any]) -> None:
-        """Best-effort stamp of ``x_last_sync_at`` on the provider's config row."""
-        try:
-            self.client.write(CONFIG_MODEL, [config_id], {"x_last_sync_at": record["x_end_time"]})
+                res = (rows[0]["id"], CONFIG_MODEL)
         except OdooError:
             pass
+
+        self._config_ids[provider] = res
+        return res
+
+    def _touch_config(self, config_id: int, config_model: str, end_time: Any) -> None:
+        """Best-effort stamp of last_sync_at on the provider's config row."""
+        time_field = "last_sync_at" if config_model == "cs.integration.config" else "x_last_sync_at"
+        try:
+            self.client.write(config_model, [config_id], {time_field: end_time})
+        except OdooError:
+            pass
+
 
     # -- file fallback ------------------------------------------------------
 
