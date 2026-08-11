@@ -181,13 +181,29 @@ class RpaJob(models.Model):
             for record in self:
                 current_state = record.state
                 target_state = vals['state']
-                if current_state != target_state and target_state not in allowed_transitions.get(current_state, []):
+                if target_state not in allowed_transitions.get(current_state, []):
                     raise ValidationError(
                         _("Unsafe state transition for job %s: cannot move directly from '%s' to '%s'.") % (
                             record.name, current_state, target_state
                         )
                     )
         return super(RpaJob, self).write(vals)
+
+    def action_claim_job_atomic(self):
+        """
+        Atomically claims a queued job inside a single server-side PostgreSQL transaction.
+        Ensures that only ONE process can transition a job from 'queued' to 'running'.
+        """
+        self.ensure_one()
+        if self.state != 'queued':
+            return False
+        now = fields.Datetime.now()
+        self.write({
+            'state': 'running',
+            'started_at': now,
+            'attempt_count': self.attempt_count + 1,
+        })
+        return self.read()[0]
 
     def action_queue(self):
         """
