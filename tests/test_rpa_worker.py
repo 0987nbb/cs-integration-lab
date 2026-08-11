@@ -335,3 +335,89 @@ class TestRpaWorkerFoundation:
 
         config = WorkerConfig(odoo_api_key="secret_api_key_8899")
         assert "secret_api_key_8899" not in repr(config)
+
+    def test_15_competing_concurrent_workers_claim_only_once(self):
+        """15. Simulates 5 competing worker threads attempting to claim the exact same queued job simultaneously."""
+        import threading
+        record = {
+            "id": 501,
+            "x_name": "RPA/2026/00501",
+            "x_job_type": "saucedemo",
+            "x_payload": '{"product_name": "Backpack"}',
+            "x_state": "queued",
+            "x_idempotency_key": "CONCURRENT-CLAIM-501",
+            "x_attempt_count": 0,
+        }
+        client = MockOdooClient(records=[record])
+        claimer = OdooJobClaimer(client=client)
+        job = RpaJobRecord.from_odoo_dict(record)
+
+        claimed_results = []
+        lock = threading.Lock()
+
+        def worker_claim_task():
+            res = claimer.claim_job(job)
+            if res is not None:
+                with lock:
+                    claimed_results.append(res)
+
+        threads = [threading.Thread(target=worker_claim_task) for _ in range(5)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        # Exactly 1 worker thread claims the job, the remaining 4 get None
+        assert len(claimed_results) == 1
+        assert claimed_results[0].state == "running"
+
+    def test_16_external_success_odoo_write_fail_reconciliation_no_duplicate_execution(self, tmp_path):
+        """
+        16. Tests resiliency pattern:
+        External action succeeds -> Odoo result write fails -> worker/process restarts ->
+        job is recovered -> prior external outcome is verified -> action is NOT executed twice.
+        """
+        from integration_service.rpa_worker.job_processor import OutcomeReconciler
+
+        ledger_file = str(tmp_path / "rpa_outcome_ledger.json")
+        reconciler1 = OutcomeReconciler(ledger_file=ledger_file)
+        processor1 = JobProcessor(reconciler=reconciler1)
+
+        job = RpaJobRecord(
+            id=601,
+            name="RPA/2026/00601",
+            job_type="saucedemo",
+            payload_str=json.dumps({
+                "product_name": "Sauce Labs Backpack",
+                "checkout": {"first_name": "Ali", "last_name": "Raza", "postal_code": "46000"}
+            }),
+            state="running",
+            idempotency_key="RECONCILE-TEST-601",
+        )
+
+        action_mock = MagicMock(return_value={"status": "completed", "order_id": "ORDER-9999"})
+
+        # Step 1: External action succeeds, but Odoo write fails
+        res1 = processor1.process_job(job, custom_task_func=action_mock)
+        assert res1.state == "success"
+        assert action_mock.call_count == 1
+
+        # Simulate Odoo write failure
+        client = MockOdooClient(records=[])
+        client.write = MagicMock(side_effect=Exception("Odoo DB connection lost"))
+        claimer = OdooJobClaimer(client=client)
+        write_success = claimer.write_result(job.id, res1)
+        assert write_success is False
+
+        # Step 2: Worker process restarts (fresh processor instance loading same outcome ledger)
+        reconciler2 = OutcomeReconciler(ledger_file=ledger_file)
+        processor2 = JobProcessor(reconciler=reconciler2)
+        action_mock.reset_mock()
+
+        # Retried / recovered job is processed again
+        res2 = processor2.process_job(job, custom_task_func=action_mock)
+
+        # Reconciliation verifies prior outcome -> action is NOT executed twice!
+        assert res2.state == "success"
+        assert res2.last_successful_step == "reconciled_prior_outcome"
+        assert action_mock.call_count == 0  # Action was NOT executed a second time!

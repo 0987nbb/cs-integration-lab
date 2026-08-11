@@ -16,9 +16,49 @@ from .logging_utils import get_worker_logger, sanitize_sensitive_data
 from .models import RpaJobRecord, JobPayload, ExecutionResult
 from .browser.base import PlaywrightBrowserManager
 
+import os
+
 LOGGER = get_worker_logger("rpa_worker.job_processor")
 
 SUPPORTED_JOB_TYPES = ("saucedemo", "ui_playground")
+
+
+class OutcomeReconciler:
+    """
+    Reconciles external action outcomes across worker restarts.
+    Prevents duplicate state-changing browser actions when Odoo result write fails.
+    """
+    def __init__(self, ledger_file: str = "logs/rpa_outcome_ledger.json"):
+        self.ledger_file = ledger_file
+
+    def _load_ledger(self) -> Dict[str, Any]:
+        if os.path.exists(self.ledger_file):
+            try:
+                with open(self.ledger_file, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception:
+                return {}
+        return {}
+
+    def save_outcome(self, idempotency_key: str, outcome_data: Dict[str, Any]) -> None:
+        """Persists completed external action outcome keyed by idempotency_key."""
+        if not idempotency_key:
+            return
+        os.makedirs(os.path.dirname(self.ledger_file), exist_ok=True)
+        ledger = self._load_ledger()
+        ledger[idempotency_key] = outcome_data
+        try:
+            with open(self.ledger_file, "w", encoding="utf-8") as f:
+                json.dump(ledger, f, indent=2)
+        except Exception as exc:
+            LOGGER.warning(f"Failed to write outcome ledger: {exc}")
+
+    def get_completed_outcome(self, idempotency_key: str) -> Optional[Dict[str, Any]]:
+        """Returns prior completed external action outcome if already executed."""
+        if not idempotency_key:
+            return None
+        ledger = self._load_ledger()
+        return ledger.get(idempotency_key)
 
 
 class JobProcessor:
@@ -28,9 +68,11 @@ class JobProcessor:
         self,
         config: Optional[WorkerConfig] = None,
         browser_manager: Optional[PlaywrightBrowserManager] = None,
+        reconciler: Optional[OutcomeReconciler] = None,
     ):
         self.config = config or WorkerConfig()
         self.browser_manager = browser_manager or PlaywrightBrowserManager(self.config)
+        self.reconciler = reconciler or OutcomeReconciler()
 
     def validate_job_payload(self, job: RpaJobRecord) -> JobPayload:
         """
@@ -81,7 +123,7 @@ class JobProcessor:
         custom_task_func: Optional[Callable[[Any, JobPayload], Dict[str, Any]]] = None,
     ) -> ExecutionResult:
         """
-        Processes claimed job: validates payload, executes workflow, captures evidence, and returns ExecutionResult.
+        Processes claimed job: validates payload, reconciles prior external outcome, executes workflow, captures evidence, and returns ExecutionResult.
         """
         LOGGER.info(
             f"Processing job {job.id} ({job.name}) [Type: {job.job_type}, Attempt: {job.attempt_count}]",
@@ -97,6 +139,22 @@ class JobProcessor:
                 state="failed",
                 error_details=f"Validation Failure: {exc.message}",
                 last_successful_step="pre_validation",
+            )
+
+        # Step 1.5: Reconciliation Check - Prior External Outcome Verification
+        prior_outcome = self.reconciler.get_completed_outcome(job.idempotency_key)
+        if prior_outcome:
+            LOGGER.info(
+                f"Reconciliation: Prior external action already completed for job {job.id} ({job.name}) with idempotency_key '{job.idempotency_key}'. Skipping duplicate execution.",
+                extra={"job_id": job.id, "job_ref": job.name, "job_type": job.job_type, "step": "reconciled"},
+            )
+            return ExecutionResult(
+                state="success",
+                result_data=prior_outcome.get("result_data"),
+                last_successful_step="reconciled_prior_outcome",
+                external_reference=str(prior_outcome.get("external_reference") or ""),
+                screenshot_base64=prior_outcome.get("screenshot_base64"),
+                screenshot_filename=prior_outcome.get("screenshot_filename"),
             )
 
         # Step 2: Browser Workflow Execution
@@ -136,7 +194,7 @@ class JobProcessor:
                 f"Successfully completed job {job.id} ({job.name})",
                 extra={"job_id": job.id, "job_ref": job.name, "job_type": job.job_type, "step": "completed"},
             )
-            return ExecutionResult(
+            exec_result = ExecutionResult(
                 state="success",
                 result_data=sanitized_output,
                 last_successful_step="completed",
@@ -144,6 +202,18 @@ class JobProcessor:
                 screenshot_base64=shot_b64,
                 screenshot_filename=f"evidence_success_{job.id}.png" if shot_b64 else None,
             )
+
+            # Persist completed outcome to reconciliation ledger
+            self.reconciler.save_outcome(
+                job.idempotency_key,
+                {
+                    "result_data": sanitized_output,
+                    "external_reference": exec_result.external_reference,
+                    "screenshot_base64": exec_result.screenshot_base64,
+                    "screenshot_filename": exec_result.screenshot_filename,
+                }
+            )
+            return exec_result
 
         except HumanInterventionRequiredError as exc:
             LOGGER.warning(
