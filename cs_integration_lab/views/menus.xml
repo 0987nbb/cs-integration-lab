@@ -14,6 +14,13 @@
                   action="action_cs_integration_config"
                   sequence="10"/>
 
+        <!-- RPA Browser Automation Jobs Submenu -->
+        <menuitem id="menu_cs_rpa_job"
+                  name="Browser Automation Jobs"
+                  parent="menu_cs_integration_lab_root"
+                  action="action_cs_rpa_job"
+                  sequence="15"/>
+
         <!-- Sync Logs Submenu -->
         <menuitem id="menu_cs_integration_sync_log"
                   name="Sync Logs"

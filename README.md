@@ -207,3 +207,33 @@ locally — the committed template holds no credential.
 * [docs/data_mapping.md](docs/data_mapping.md) — per-API field mappings, external-id formats, upsert rules
 * [docs/api_usage.md](docs/api_usage.md) — setup, every environment variable, every CLI invocation
 * [docs/troubleshooting.md](docs/troubleshooting.md) — symptom → cause → fix, including the 403 access-rule fix
+
+---
+
+## Phase 2: External Playwright RPA Worker Foundation
+
+The external Python RPA worker (`integration_service/rpa_worker/`) polls Odoo for Browser Automation Jobs (`x_rpa_job` / `cs.rpa.job`) in `queued` state, claims them safely, executes browser automation via Python Playwright OUTSIDE Odoo, and reports structured outcomes back to Odoo.
+
+### Architecture Highlights
+- **Control Plane**: Odoo Online (`https://ai-demo-company.odoo.com`).
+- **Worker Execution**: External Python worker running Playwright headless Chromium.
+- **Safe Claim Mechanism**: Optimistic Compare-and-Update (`x_state = 'queued' -> 'running'`).
+- **Stale Running Recovery**: Automatic detection and recovery of jobs stuck in `running` state beyond `RPA_STALE_RUNNING_TIMEOUT_SECONDS` (default: 600s).
+- **Error Classification**:
+  - `TransientWorkerError` (network/browser timeouts ➔ `failed` state)
+  - `PermanentWorkerError` (invalid payload, bad JSON, missing element ➔ `failed` state)
+  - `HumanInterventionRequiredError` (CAPTCHA/2FA challenges ➔ `needs_human` state; NEVER attempts automatic bypass)
+- **Credential Redaction**: `sanitize_sensitive_data` masks API keys, passwords, bearer tokens, and secrets from all logs.
+
+### Running the RPA Worker & Smoke Test
+```bash
+# Install Playwright browser binaries
+.venv/Scripts/python.exe -m playwright install chromium
+
+# Run safe browser smoke test (launches Chromium, visits harmless page, closes)
+.venv/Scripts/python.exe -m pytest tests/test_playwright_smoke.py -q
+
+# Run worker foundation tests
+.venv/Scripts/python.exe -m pytest tests/test_rpa_worker.py -q
+```
+

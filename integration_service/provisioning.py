@@ -33,6 +33,7 @@ INTEGRATION_MANAGER_GROUP = "Integration Manager"
 #: The two custom models the integration owns.
 CONFIG_MODEL = "x_integration_config"
 SYNC_LOG_MODEL = "x_integration_sync_log"
+RPA_JOB_MODEL = "x_rpa_job"
 
 #: Custom fields added to ``res.partner`` for the Open-Meteo forecast.
 PARTNER_FORECAST_FIELDS: List[Dict[str, Any]] = [
@@ -518,9 +519,40 @@ SYNC_LOG_FIELD_SPECS: List[Dict[str, Any]] = [
     {"name": "x_error_details", "ttype": "text", "field_description": "Error Details"},
 ]
 
+RPA_JOB_TYPE_SELECTION: List[Tuple[str, str]] = [
+    ("saucedemo", "SauceDemo E2E Checkout"),
+    ("ui_playground", "UI Testing Playground"),
+]
+
+RPA_STATE_SELECTION: List[Tuple[str, str]] = [
+    ("draft", "Draft"),
+    ("queued", "Queued"),
+    ("running", "Running"),
+    ("success", "Success"),
+    ("failed", "Failed"),
+    ("needs_human", "Needs Human Intervention"),
+]
+
+RPA_JOB_FIELD_SPECS: List[Dict[str, Any]] = [
+    {"name": "x_name", "ttype": "char", "field_description": "Reference"},
+    {"name": "x_job_type", "ttype": "selection", "field_description": "Job Type", "required": True, "selection": RPA_JOB_TYPE_SELECTION},
+    {"name": "x_payload", "ttype": "text", "field_description": "Input Payload", "required": True},
+    {"name": "x_state", "ttype": "selection", "field_description": "State", "required": True, "selection": RPA_STATE_SELECTION},
+    {"name": "x_idempotency_key", "ttype": "char", "field_description": "Idempotency Key", "required": True, "index": True},
+    {"name": "x_attempt_count", "ttype": "integer", "field_description": "Attempt Count"},
+    {"name": "x_started_at", "ttype": "datetime", "field_description": "Started At"},
+    {"name": "x_finished_at", "ttype": "datetime", "field_description": "Finished At"},
+    {"name": "x_last_successful_step", "ttype": "char", "field_description": "Last Successful Step"},
+    {"name": "x_result", "ttype": "text", "field_description": "Result"},
+    {"name": "x_error_details", "ttype": "text", "field_description": "Error Details"},
+    {"name": "x_screenshot", "ttype": "binary", "field_description": "Screenshot / Evidence"},
+    {"name": "x_screenshot_filename", "ttype": "char", "field_description": "Screenshot Filename"},
+    {"name": "x_external_reference", "ttype": "char", "field_description": "External Reference"},
+]
+
 
 def ensure_integration_models(client: Any, dry_run: bool = False) -> Dict[str, Any]:
-    """Create both integration models and every column they need.
+    """Create integration models and every column they need.
 
     This is what makes a *fresh* trial reachable: neither model ships with Odoo,
     and neither can arrive as an addon on Odoo Online.
@@ -529,6 +561,7 @@ def ensure_integration_models(client: Any, dry_run: bool = False) -> Dict[str, A
     for model, description, specs in (
         (CONFIG_MODEL, "Integration Configuration", CONFIG_FIELD_SPECS),
         (SYNC_LOG_MODEL, "Integration Sync Log", SYNC_LOG_FIELD_SPECS),
+        (RPA_JOB_MODEL, "Browser Automation Job", RPA_JOB_FIELD_SPECS),
     ):
         model_id, state = ensure_model(client, model, description, dry_run=dry_run)
         entry: Dict[str, Any] = {"model": state}
@@ -659,7 +692,7 @@ def _security_code(menu_ids: Sequence[int], action_ids: Sequence[int],
     """
     header = (
         f"GROUP_NAME = {INTEGRATION_MANAGER_GROUP!r}\n"
-        f"MODEL_NAMES = {[CONFIG_MODEL, SYNC_LOG_MODEL]!r}\n"
+        f"MODEL_NAMES = {[CONFIG_MODEL, SYNC_LOG_MODEL, RPA_JOB_MODEL]!r}\n"
         "UI_TARGETS = []\n"
         "UI_UNRESTRICT = [\n"
         f"    ('ir.ui.menu', {list(menu_ids)!r}),\n"
@@ -850,7 +883,8 @@ def ensure_menus(client: Any, dry_run: bool = False) -> Dict[str, Any]:
 
     specs = [
         ("Integrations", CONFIG_MODEL, 1, "menu_integrations", "action_integrations"),
-        ("Sync Logs", SYNC_LOG_MODEL, 2, "menu_sync_logs", "action_sync_logs"),
+        ("Browser Automation Jobs", RPA_JOB_MODEL, 2, "menu_rpa_jobs", "action_rpa_jobs"),
+        ("Sync Logs", SYNC_LOG_MODEL, 3, "menu_sync_logs", "action_sync_logs"),
     ]
     first_action_id: Optional[int] = None
     try:
@@ -985,6 +1019,192 @@ def ensure_integration_config_records(client: Any, dry_run: bool = False) -> Dic
     return report
 
 
+def ensure_rpa_job_views(client: Any, dry_run: bool = False) -> Dict[str, Any]:
+    """Ensure structured form and list views are created for ``x_rpa_job``."""
+    report: Dict[str, Any] = {"form": "existing", "list": "existing"}
+    form_arch = (
+        '<form string="Browser Automation Job">'
+        '<header>'
+        '<field name="x_state" widget="statusbar" statusbar_visible="draft,queued,running,success,failed,needs_human"/>'
+        '</header>'
+        '<sheet>'
+        '<div class="oe_title"><h1><field name="x_name" placeholder="e.g. RPA/2026/00001"/></h1></div>'
+        '<group>'
+        '<group string="Job Definition">'
+        '<field name="x_job_type" required="1"/>'
+        '<field name="x_state" required="1"/>'
+        '<field name="x_idempotency_key" required="1"/>'
+        '<field name="x_external_reference"/>'
+        '</group>'
+        '<group string="Execution Metrics">'
+        '<field name="x_attempt_count" readonly="1"/>'
+        '<field name="x_started_at" readonly="1"/>'
+        '<field name="x_finished_at" readonly="1"/>'
+        '<field name="x_last_successful_step" readonly="1"/>'
+        '</group>'
+        '</group>'
+        '<notebook>'
+        '<page string="Payload &amp; Result" name="payload_result">'
+        '<group>'
+        '<field name="x_payload" required="1" placeholder=\'{"product_name": "Sauce Labs Backpack"}\'/>'
+        '<field name="x_result" readonly="1"/>'
+        '</group>'
+        '</page>'
+        '<page string="Diagnostics &amp; Error Details" name="diagnostics">'
+        '<group>'
+        '<field name="x_error_details" readonly="1"/>'
+        '</group>'
+        '</page>'
+        '<page string="Evidence &amp; Screenshots" name="evidence">'
+        '<group>'
+        '<field name="x_screenshot_filename" invisible="1"/>'
+        '<field name="x_screenshot" widget="image" options="{\'size\': [600, 400]}" filename="x_screenshot_filename"/>'
+        '</group>'
+        '</page>'
+        '</notebook>'
+        '</sheet>'
+        '</form>'
+    )
+    list_arch = (
+        '<list string="Browser Automation Jobs">'
+        '<field name="x_name"/>'
+        '<field name="x_job_type"/>'
+        '<field name="x_state" widget="badge"/>'
+        '<field name="x_idempotency_key"/>'
+        '<field name="x_attempt_count"/>'
+        '<field name="x_last_successful_step"/>'
+        '<field name="x_started_at"/>'
+        '<field name="x_finished_at"/>'
+        '</list>'
+    )
+    try:
+        # Unset required constraint on ir.model.fields for x_rpa_job so form saving doesn't block
+        if not dry_run:
+            try:
+                field_rows = client.search_read("ir.model.fields", [["model", "=", RPA_JOB_MODEL], ["required", "=", True]], fields=["id", "name"])
+                for row in field_rows:
+                    client.write("ir.model.fields", [row["id"]], {"required": False})
+            except OdooError:
+                pass
+        existing_form = client.search_read("ir.ui.view", [["name", "=", "x_rpa_job.form"], ["model", "=", RPA_JOB_MODEL]], fields=["id"], limit=1)
+        if existing_form:
+            view_id = existing_form[0]["id"]
+            if not dry_run:
+                client.write("ir.ui.view", [view_id], {"arch": form_arch})
+        else:
+            if not dry_run:
+                client.create_one("ir.ui.view", {"name": "x_rpa_job.form", "model": RPA_JOB_MODEL, "type": "form", "arch": form_arch, "active": True})
+            report["form"] = "created"
+
+        existing_list = client.search_read("ir.ui.view", [["name", "=", "x_rpa_job.list"], ["model", "=", RPA_JOB_MODEL]], fields=["id"], limit=1)
+        if existing_list:
+            view_id = existing_list[0]["id"]
+            if not dry_run:
+                client.write("ir.ui.view", [view_id], {"arch": list_arch})
+        else:
+            if not dry_run:
+                client.create_one("ir.ui.view", {"name": "x_rpa_job.list", "model": RPA_JOB_MODEL, "type": "list", "arch": list_arch, "active": True})
+            report["list"] = "created"
+
+        # Provision Queue / Run and Retry Job server actions on x_rpa_job model for Actions menu
+        if not dry_run:
+            model_id = _model_id(client, RPA_JOB_MODEL)
+            if model_id:
+                code_queue = (
+                    "for rec in records:\n"
+                    "    if rec.x_state == 'draft':\n"
+                    "        rec.write({'x_state': 'queued'})\n"
+                )
+                sa_queue = client.search_read("ir.actions.server", [["name", "=", "Queue / Run Job"], ["model_id", "=", model_id]], fields=["id"], limit=1)
+                if not sa_queue:
+                    client.create_one("ir.actions.server", {
+                        "name": "Queue / Run Job",
+                        "model_id": model_id,
+                        "binding_model_id": model_id,
+                        "binding_view_types": "list,form",
+                        "state": "code",
+                        "code": code_queue,
+                    })
+
+                code_retry = (
+                    "for rec in records:\n"
+                    "    if rec.x_state in ('failed', 'needs_human'):\n"
+                    "        rec.write({'x_state': 'queued', 'x_attempt_count': (rec.x_attempt_count or 0) + 1, 'x_error_details': False})\n"
+                )
+                sa_retry = client.search_read("ir.actions.server", [["name", "=", "Retry Job"], ["model_id", "=", model_id]], fields=["id"], limit=1)
+                if not sa_retry:
+                    client.create_one("ir.actions.server", {
+                        "name": "Retry Job",
+                        "model_id": model_id,
+                        "binding_model_id": model_id,
+                        "binding_view_types": "list,form",
+                        "state": "code",
+                        "code": code_retry,
+                    })
+    except OdooError as exc:
+        report["error"] = sanitize(exc)
+    return report
+
+
+def ensure_rpa_job_uniqueness_guard(client: Any, dry_run: bool = False) -> Dict[str, Any]:
+    """Ensure server-side uniqueness enforcement for x_rpa_job.x_idempotency_key on Odoo Online."""
+    report: Dict[str, Any] = {"server_action": "existing", "automated_action": "existing"}
+    if dry_run:
+        return {"status": "skipped (dry run)"}
+
+    try:
+        model_id = _model_id(client, RPA_JOB_MODEL)
+        if not model_id:
+            return {"status": "failed: model not found"}
+
+        code = (
+            "for rec in records:\n"
+            "    key = rec.x_idempotency_key\n"
+            "    if key and str(key).strip():\n"
+            "        clean_key = str(key).strip()\n"
+            "        domain = [('x_idempotency_key', '=ilike', clean_key), ('id', '!=', rec.id)]\n"
+            "        existing = env['x_rpa_job'].sudo().search(domain, limit=1)\n"
+            "        if existing:\n"
+            "            raise UserError('Validation Error: Idempotency key \\'' + clean_key + '\\' is already in use by another RPA job (' + str(existing.x_name or existing.id) + ').')\n"
+        )
+
+        sa_rows = client.search_read("ir.actions.server", [["name", "=", "RPA Job Uniqueness Guard"]], fields=["id"], limit=1)
+        if sa_rows:
+            action_id = sa_rows[0]["id"]
+            client.write("ir.actions.server", [action_id], {"code": code, "model_id": model_id})
+        else:
+            action_id = client.create_one("ir.actions.server", {
+                "name": "RPA Job Uniqueness Guard",
+                "model_id": model_id,
+                "state": "code",
+                "code": code,
+            })
+            report["server_action"] = "created"
+
+        ba_rows = client.search_read("base.automation", [["name", "=", "RPA Job Uniqueness Guard"]], fields=["id"], limit=1)
+        if ba_rows:
+            ba_id = ba_rows[0]["id"]
+            client.write("base.automation", [ba_id], {
+                "model_id": model_id,
+                "trigger": "on_create_or_write",
+                "action_server_ids": [(6, 0, [action_id])],
+                "active": True,
+            })
+        else:
+            ba_id = client.create_one("base.automation", {
+                "name": "RPA Job Uniqueness Guard",
+                "model_id": model_id,
+                "trigger": "on_create_or_write",
+                "action_server_ids": [(6, 0, [action_id])],
+                "active": True,
+            })
+            report["automated_action"] = "created"
+
+    except OdooError as exc:
+        report["failed"] = sanitize(exc)
+    return report
+
+
 def provision(client: Any, dry_run: bool = False) -> Dict[str, Any]:
     """Bring any database - including an empty one - to the expected state.
 
@@ -999,6 +1219,8 @@ def provision(client: Any, dry_run: bool = False) -> Dict[str, Any]:
         "partner_forecast_fields": ensure_partner_forecast_fields(client, dry_run=dry_run),
         "idempotency_fields": ensure_idempotency_fields(client, dry_run=dry_run),
         "partner_forecast_view": ensure_partner_forecast_view(client, dry_run=dry_run),
+        "rpa_job_views": ensure_rpa_job_views(client, dry_run=dry_run),
+        "rpa_job_uniqueness_guard": ensure_rpa_job_uniqueness_guard(client, dry_run=dry_run),
         "integration_config_views": ensure_integration_config_views(client, dry_run=dry_run),
         "integration_config_records": ensure_integration_config_records(client, dry_run=dry_run),
         "menus": ensure_menus(client, dry_run=dry_run),
