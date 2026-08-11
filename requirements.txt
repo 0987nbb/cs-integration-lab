@@ -1,5 +1,6 @@
 requests>=2.31
 python-dotenv>=1.0
+playwright>=1.41.0
 
 # Testing
 pytest>=8.0

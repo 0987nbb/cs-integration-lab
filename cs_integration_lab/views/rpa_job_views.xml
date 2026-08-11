@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        <!-- RPA Job List View -->
+        <record id="view_cs_rpa_job_tree" model="ir.ui.view">
+            <field name="name">cs.rpa.job.tree</field>
+            <field name="model">cs.rpa.job</field>
+            <field name="arch" type="xml">
+                <list string="Browser Automation Jobs" decoration-info="state == 'queued'" decoration-warning="state == 'running' or state == 'needs_human'" decoration-success="state == 'success'" decoration-danger="state == 'failed'">
+                    <header>
+                        <button name="action_queue" string="Queue Selected" type="object" class="btn-primary" groups="cs_integration_lab.group_integration_manager"/>
+                        <button name="action_retry" string="Retry Selected" type="object" class="btn-warning" groups="cs_integration_lab.group_integration_manager"/>
+                    </header>
+                    <field name="name"/>
+                    <field name="job_type"/>
+                    <field name="state" widget="badge"/>
+                    <field name="idempotency_key"/>
+                    <field name="attempt_count"/>
+                    <field name="last_successful_step"/>
+                    <field name="external_reference"/>
+                    <field name="started_at"/>
+                    <field name="finished_at"/>
+                </list>
+            </field>
+        </record>
+
+        <!-- RPA Job Form View -->
+        <record id="view_cs_rpa_job_form" model="ir.ui.view">
+            <field name="name">cs.rpa.job.form</field>
+            <field name="model">cs.rpa.job</field>
+            <field name="arch" type="xml">
+                <form string="Browser Automation Job">
+                    <header>
+                        <button name="action_queue" string="Queue / Run" type="object" class="oe_highlight" invisible="state != 'draft'" groups="cs_integration_lab.group_integration_manager"/>
+                        <button name="action_retry" string="Retry Job" type="object" class="btn-warning" invisible="state not in ('failed', 'needs_human')" groups="cs_integration_lab.group_integration_manager"/>
+                        <field name="state" widget="statusbar" statusbar_visible="draft,queued,running,success,failed,needs_human"/>
+                    </header>
+                    <sheet>
+                        <div class="oe_title">
+                            <h1>
+                                <field name="name" readonly="1"/>
+                            </h1>
+                        </div>
+                        <group>
+                            <group string="Job Definition">
+                                <field name="job_type" required="1" readonly="state != 'draft'"/>
+                                <field name="state"/>
+                                <field name="idempotency_key" required="1" readonly="state != 'draft'"/>
+                                <field name="external_reference"/>
+                            </group>
+                            <group string="Execution Metrics">
+                                <field name="attempt_count" readonly="1"/>
+                                <field name="started_at" readonly="1"/>
+                                <field name="finished_at" readonly="1"/>
+                                <field name="last_successful_step" readonly="1"/>
+                            </group>
+                        </group>
+                        <notebook>
+                            <page string="Payload &amp; Result" name="payload_result">
+                                <group>
+                                    <field name="payload" required="1" readonly="state != 'draft'" placeholder='{"product_name": "Sauce Labs Backpack"}'/>
+                                    <field name="result" readonly="1" placeholder="Execution output JSON / details will appear here after worker completes..."/>
+                                </group>
+                            </page>
+                            <page string="Diagnostics &amp; Error Details" name="diagnostics">
+                                <group>
+                                    <field name="error_details" readonly="1" placeholder="Error backtrace or failure details..."/>
+                                </group>
+                            </page>
+                            <page string="Evidence &amp; Screenshots" name="evidence">
+                                <group>
+                                    <field name="screenshot_filename" invisible="1"/>
+                                    <field name="screenshot" widget="image" options="{'size': [600, 400]}" filename="screenshot_filename"/>
+                                </group>
+                            </page>
+                        </notebook>
+                    </sheet>
+                    <chatter/>
+                </form>
+            </field>
+        </record>
+
+        <!-- RPA Job Search View -->
+        <record id="view_cs_rpa_job_search" model="ir.ui.view">
+            <field name="name">cs.rpa.job.search</field>
+            <field name="model">cs.rpa.job</field>
+            <field name="arch" type="xml">
+                <search string="Search Browser Automation Jobs">
+                    <field name="name" string="Reference / Name"/>
+                    <field name="job_type"/>
+                    <field name="idempotency_key"/>
+                    <field name="external_reference"/>
+                    <separator/>
+                    <filter string="Draft" name="filter_draft" domain="[('state', '=', 'draft')]"/>
+                    <filter string="Queued" name="filter_queued" domain="[('state', '=', 'queued')]"/>
+                    <filter string="Running" name="filter_running" domain="[('state', '=', 'running')]"/>
+                    <filter string="Success" name="filter_success" domain="[('state', '=', 'success')]"/>
+                    <filter string="Failed" name="filter_failed" domain="[('state', '=', 'failed')]"/>
+                    <filter string="Needs Human" name="filter_needs_human" domain="[('state', '=', 'needs_human')]"/>
+                    <separator/>
+                    <group expand="0" string="Group By">
+                        <filter string="Job Type" name="groupby_job_type" context="{'group_by': 'job_type'}"/>
+                        <filter string="State" name="groupby_state" context="{'group_by': 'state'}"/>
+                    </group>
+                </search>
+            </field>
+        </record>
+
+        <!-- RPA Job Window Action -->
+        <record id="action_cs_rpa_job" model="ir.actions.act_window">
+            <field name="name">Browser Automation Jobs</field>
+            <field name="res_model">cs.rpa.job</field>
+            <field name="view_mode">list,form</field>
+            <field name="search_view_id" ref="view_cs_rpa_job_search"/>
+            <field name="help" type="html">
+                <p class="o_view_nocontent_smiling_face">
+                    Create your first Browser Automation / RPA Job!
+                </p>
+                <p>
+                    Queue automation workflows (SauceDemo, UI Testing Playground) to be safely executed by the external Python Playwright worker.
+                </p>
+            </field>
+        </record>
+    </data>
+</odoo>
