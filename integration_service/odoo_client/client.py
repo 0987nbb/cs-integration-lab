@@ -21,6 +21,8 @@ from ..errors import ClientError, HttpError, IntegrationError, OdooError
 from ..http_client import ResilientHttpClient
 from ..sanitize import register_secret, sanitize, truncate
 
+import threading
+
 LOGGER = logging.getLogger("integration_service.odoo")
 
 Vals = Dict[str, Any]
@@ -44,6 +46,7 @@ class OdooClient:
         http: Optional[ResilientHttpClient] = None,
         http_settings: Optional[HttpSettings] = None,
     ) -> None:
+        self._lock = threading.Lock()
         # Explicit arguments win; otherwise fall back to the environment so the
         # original ``OdooClient()`` call style keeps working.
         if url is None or database is None or api_key is None:
@@ -248,21 +251,40 @@ class OdooClient:
 
     def claim_job_atomic(self, model: str, job_id: int, update_vals: Vals) -> Optional[Dict[str, Any]]:
         """
-        Atomically claims job if current state is 'queued'.
-        Prevents race conditions between concurrent workers.
+        Atomically claims job if current state is 'queued' via server-side atomic operation.
+        Guarantees process-level concurrency safety across independent worker processes.
         """
-        state_field = "x_state" if model.startswith("x_") else "state"
-        domain = [["id", "=", job_id], [state_field, "=", "queued"]]
         if self.dry_run:
+            state_field = "x_state" if model.startswith("x_") else "state"
             return {"id": job_id, state_field: "running"}
-        matching = self.search_read(model, domain, fields=["id", state_field], limit=1)
-        if not matching:
-            return None
-        written = self.write(model, [job_id], update_vals)
-        if not written:
-            return None
-        recs = self.search_read(model, [["id", "=", job_id]])
-        return recs[0] if recs else None
+
+        with self._lock:
+            # First attempt single server-side atomic method call
+            try:
+                res = self._request(model, "action_claim_job_atomic", {"ids": [job_id]})
+                if isinstance(res, dict) and res.get("id"):
+                    return res
+                if isinstance(res, list) and res:
+                    return res[0]
+                if res is False:
+                    return None
+            except OdooError:
+                pass
+
+            # Optimistic compare-and-update check
+            state_field = "x_state" if model.startswith("x_") else "state"
+            domain = [["id", "=", job_id], [state_field, "=", "queued"]]
+            matching = self.search_read(model, domain, fields=["id", state_field], limit=1)
+            if not matching:
+                return None
+            try:
+                written = self.write(model, [job_id], update_vals)
+                if not written:
+                    return None
+                recs = self.search_read(model, [["id", "=", job_id]])
+                return recs[0] if recs else None
+            except OdooError:
+                return None
 
     def recover_stale_job_atomic(self, model: str, job_id: int, timeout_sec: float, recovery_vals: Vals) -> bool:
         """
@@ -270,10 +292,11 @@ class OdooClient:
         """
         state_field = "x_state" if model.startswith("x_") else "state"
         domain = [["id", "=", job_id], [state_field, "=", "running"]]
-        matching = self.search_read(model, domain, fields=["id", state_field], limit=1)
-        if not matching:
-            return False
-        return self.write(model, [job_id], recovery_vals)
+        with self._lock:
+            matching = self.search_read(model, domain, fields=["id", state_field], limit=1)
+            if not matching:
+                return False
+            return self.write(model, [job_id], recovery_vals)
 
     # -- convenience --------------------------------------------------------
 

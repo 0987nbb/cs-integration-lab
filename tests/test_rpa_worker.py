@@ -339,6 +339,7 @@ class TestRpaWorkerFoundation:
     def test_15_competing_concurrent_workers_claim_only_once(self):
         """15. Simulates 5 competing worker threads attempting to claim the exact same queued job simultaneously."""
         import threading
+        import time
         record = {
             "id": 501,
             "x_name": "RPA/2026/00501",
@@ -352,14 +353,19 @@ class TestRpaWorkerFoundation:
         claimer = OdooJobClaimer(client=client)
         job = RpaJobRecord.from_odoo_dict(record)
 
+        barrier = threading.Barrier(5)
         claimed_results = []
+        failed_results = []
         lock = threading.Lock()
 
         def worker_claim_task():
+            barrier.wait()  # Synchronize all 5 threads to launch claim at the exact same instant
             res = claimer.claim_job(job)
-            if res is not None:
-                with lock:
+            with lock:
+                if res is not None:
                     claimed_results.append(res)
+                else:
+                    failed_results.append(res)
 
         threads = [threading.Thread(target=worker_claim_task) for _ in range(5)]
         for t in threads:
@@ -367,9 +373,45 @@ class TestRpaWorkerFoundation:
         for t in threads:
             t.join()
 
-        # Exactly 1 worker thread claims the job, the remaining 4 get None
+        # Exactly 1 worker thread claims the job, remaining 4 get None (claim failure)
         assert len(claimed_results) == 1
+        assert len(failed_results) == 4
         assert claimed_results[0].state == "running"
+        assert record["x_state"] == "running"
+
+        # Race Condition Proof: Verify that non-atomic search_read + write permits duplicate claims
+        unsafe_record = {
+            "id": 502,
+            "x_name": "RPA/2026/00502",
+            "x_job_type": "saucedemo",
+            "x_payload": '{"product_name": "Backpack"}',
+            "x_state": "queued",
+            "x_idempotency_key": "CONCURRENT-CLAIM-502",
+            "x_attempt_count": 0,
+        }
+        unsafe_client = MockOdooClient(records=[unsafe_record])
+        unsafe_claimed = []
+        unsafe_barrier = threading.Barrier(5)
+
+        def unsafe_task():
+            # Step A: All threads execute search_read concurrently
+            unsafe_barrier.wait()
+            matching = unsafe_client.search_read("x_rpa_job", [["id", "=", 502], ["x_state", "=", "queued"]])
+            # Step B: All threads pass check before any write executes
+            unsafe_barrier.wait()
+            if matching:
+                unsafe_client.write("x_rpa_job", [502], {"x_state": "running"})
+                with lock:
+                    unsafe_claimed.append(502)
+
+        unsafe_threads = [threading.Thread(target=unsafe_task) for _ in range(5)]
+        for t in unsafe_threads:
+            t.start()
+        for t in unsafe_threads:
+            t.join()
+
+        # Proves that without atomic claim, search_read + write produces 5 duplicate claims (>1)
+        assert len(unsafe_claimed) == 5
 
     def test_16_external_success_odoo_write_fail_reconciliation_no_duplicate_execution(self, tmp_path):
         """
@@ -396,6 +438,7 @@ class TestRpaWorkerFoundation:
         )
 
         action_mock = MagicMock(return_value={"status": "completed", "order_id": "ORDER-9999"})
+        readback_mock = MagicMock(return_value={"result_data": {"status": "completed", "order_id": "ORDER-9999"}, "external_reference": "ORDER-9999"})
 
         # Step 1: External action succeeds, but Odoo write fails
         res1 = processor1.process_job(job, custom_task_func=action_mock)
@@ -409,15 +452,16 @@ class TestRpaWorkerFoundation:
         write_success = claimer.write_result(job.id, res1)
         assert write_success is False
 
-        # Step 2: Worker process restarts (fresh processor instance loading same outcome ledger)
+        # Step 2: Worker process restarts (fresh processor instance loading same outcome ledger & external readback)
         reconciler2 = OutcomeReconciler(ledger_file=ledger_file)
         processor2 = JobProcessor(reconciler=reconciler2)
         action_mock.reset_mock()
 
-        # Retried / recovered job is processed again
-        res2 = processor2.process_job(job, custom_task_func=action_mock)
+        # Retried / recovered job is processed again with external read-back verification
+        res2 = processor2.process_job(job, custom_task_func=action_mock, external_readback_func=readback_mock)
 
-        # Reconciliation verifies prior outcome -> action is NOT executed twice!
-        assert res2.state == "success"
+        # Verification assertions:
+        assert readback_mock.call_count >= 1     # External read-back query was executed
+        assert res2.state == "success"          # Final job state is successful/reconciled
         assert res2.last_successful_step == "reconciled_prior_outcome"
-        assert action_mock.call_count == 0  # Action was NOT executed a second time!
+        assert action_mock.call_count == 0       # State-changing external action was NOT executed a second time!
