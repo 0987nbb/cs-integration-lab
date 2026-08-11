@@ -352,14 +352,19 @@ class TestRpaWorkerFoundation:
         claimer = OdooJobClaimer(client=client)
         job = RpaJobRecord.from_odoo_dict(record)
 
+        barrier = threading.Barrier(5)
         claimed_results = []
+        failed_results = []
         lock = threading.Lock()
 
         def worker_claim_task():
+            barrier.wait()  # Synchronize all 5 threads to launch claim at the exact same instant
             res = claimer.claim_job(job)
-            if res is not None:
-                with lock:
+            with lock:
+                if res is not None:
                     claimed_results.append(res)
+                else:
+                    failed_results.append(res)
 
         threads = [threading.Thread(target=worker_claim_task) for _ in range(5)]
         for t in threads:
@@ -367,9 +372,11 @@ class TestRpaWorkerFoundation:
         for t in threads:
             t.join()
 
-        # Exactly 1 worker thread claims the job, the remaining 4 get None
+        # Exactly 1 worker thread claims the job, remaining 4 get None (claim failure)
         assert len(claimed_results) == 1
+        assert len(failed_results) == 4
         assert claimed_results[0].state == "running"
+        assert record["x_state"] == "running"
 
     def test_16_external_success_odoo_write_fail_reconciliation_no_duplicate_execution(self, tmp_path):
         """
@@ -396,6 +403,7 @@ class TestRpaWorkerFoundation:
         )
 
         action_mock = MagicMock(return_value={"status": "completed", "order_id": "ORDER-9999"})
+        readback_mock = MagicMock(return_value={"result_data": {"status": "completed", "order_id": "ORDER-9999"}, "external_reference": "ORDER-9999"})
 
         # Step 1: External action succeeds, but Odoo write fails
         res1 = processor1.process_job(job, custom_task_func=action_mock)
@@ -409,15 +417,16 @@ class TestRpaWorkerFoundation:
         write_success = claimer.write_result(job.id, res1)
         assert write_success is False
 
-        # Step 2: Worker process restarts (fresh processor instance loading same outcome ledger)
+        # Step 2: Worker process restarts (fresh processor instance loading same outcome ledger & external readback)
         reconciler2 = OutcomeReconciler(ledger_file=ledger_file)
         processor2 = JobProcessor(reconciler=reconciler2)
         action_mock.reset_mock()
 
-        # Retried / recovered job is processed again
-        res2 = processor2.process_job(job, custom_task_func=action_mock)
+        # Retried / recovered job is processed again with external read-back verification
+        res2 = processor2.process_job(job, custom_task_func=action_mock, external_readback_func=readback_mock)
 
-        # Reconciliation verifies prior outcome -> action is NOT executed twice!
-        assert res2.state == "success"
+        # Verification assertions:
+        assert readback_mock.call_count >= 1     # External read-back query was executed
+        assert res2.state == "success"          # Final job state is successful/reconciled
         assert res2.last_successful_step == "reconciled_prior_outcome"
-        assert action_mock.call_count == 0  # Action was NOT executed a second time!
+        assert action_mock.call_count == 0       # State-changing external action was NOT executed a second time!

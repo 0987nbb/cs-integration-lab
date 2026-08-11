@@ -60,6 +60,36 @@ class OutcomeReconciler:
         ledger = self._load_ledger()
         return ledger.get(idempotency_key)
 
+    def reconcile_prior_outcome(
+        self,
+        job: RpaJobRecord,
+        external_readback_func: Optional[Callable[[RpaJobRecord], Optional[Dict[str, Any]]]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Reconciles prior outcome using external read-back verification and local ledger evidence.
+        """
+        if external_readback_func:
+            try:
+                ext_data = external_readback_func(job)
+                if ext_data:
+                    LOGGER.info(f"External Read-Back verified prior completion for job {job.id} ({job.name}).")
+                    return ext_data
+            except Exception as exc:
+                LOGGER.warning(f"External read-back check failed for job {job.id}: {exc}")
+
+        if job.idempotency_key:
+            ledger_data = self.get_completed_outcome(job.idempotency_key)
+            if ledger_data:
+                return ledger_data
+
+        if job.last_successful_step in ("completed", "reconciled_prior_outcome") or job.external_reference:
+            return {
+                "result_data": {"status": "completed", "external_reference": job.external_reference},
+                "external_reference": job.external_reference,
+            }
+
+        return None
+
 
 class JobProcessor:
     """Processes an individual claimed RPA Job record."""
@@ -121,6 +151,7 @@ class JobProcessor:
         self,
         job: RpaJobRecord,
         custom_task_func: Optional[Callable[[Any, JobPayload], Dict[str, Any]]] = None,
+        external_readback_func: Optional[Callable[[RpaJobRecord], Optional[Dict[str, Any]]]] = None,
     ) -> ExecutionResult:
         """
         Processes claimed job: validates payload, reconciles prior external outcome, executes workflow, captures evidence, and returns ExecutionResult.
@@ -141,8 +172,8 @@ class JobProcessor:
                 last_successful_step="pre_validation",
             )
 
-        # Step 1.5: Reconciliation Check - Prior External Outcome Verification
-        prior_outcome = self.reconciler.get_completed_outcome(job.idempotency_key)
+        # Step 1.5: Reconciliation Check - External Read-Back & Outcome Verification
+        prior_outcome = self.reconciler.reconcile_prior_outcome(job, external_readback_func=external_readback_func)
         if prior_outcome:
             LOGGER.info(
                 f"Reconciliation: Prior external action already completed for job {job.id} ({job.name}) with idempotency_key '{job.idempotency_key}'. Skipping duplicate execution.",
