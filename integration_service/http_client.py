@@ -61,9 +61,31 @@ class HttpResponse:
         """
         return self.status_code == 204 or (self.data is None and not self.text.strip())
 
+    @property
+    def request_id(self) -> Optional[str]:
+        """Extract Graph request/client correlation ID from response headers."""
+        return self.graph_request_id or self.correlation_id
+
+    @property
+    def graph_request_id(self) -> Optional[str]:
+        """Extract Microsoft Graph's server-side request identifier."""
+        if not self.headers:
+            return None
+        headers_lower = {k.lower(): v for k, v in self.headers.items()}
+        return headers_lower.get("request-id") or headers_lower.get("x-ms-request-id")
+
+    @property
+    def correlation_id(self) -> Optional[str]:
+        """Extract the client correlation ID echoed by Microsoft Graph."""
+        if not self.headers:
+            return None
+        headers_lower = {k.lower(): v for k, v in self.headers.items()}
+        return headers_lower.get("client-request-id")
+
     def link(self, rel: str) -> Optional[str]:
         """Return the URL for ``rel`` from an RFC-8288 ``Link`` header."""
         return parse_link_header(self.headers.get("Link") or self.headers.get("link")).get(rel)
+
 
 
 def parse_link_header(value: Optional[str]) -> Dict[str, str]:
@@ -146,6 +168,7 @@ class ResilientHttpClient:
             self.default_headers.update(default_headers)
         #: Populated for observability; values are never logged verbatim.
         self.last_status: Optional[int] = None
+        self.last_retry_count: int = 0
 
     # -- public API ---------------------------------------------------------
 
@@ -188,6 +211,7 @@ class ResilientHttpClient:
         effective_timeout = self.settings.timeout if timeout is None else timeout
         safe_url = sanitize(url)
         last_error: Optional[HttpError] = None
+        self.last_retry_count = 0
 
         for attempt in range(1, attempts + 1):
             try:
@@ -223,12 +247,15 @@ class ResilientHttpClient:
                 self.last_status = response.status_code
                 outcome = self._evaluate(method, safe_url, response, attempt, attempts, expect_json)
                 if isinstance(outcome, HttpResponse):
+                    self.last_retry_count = attempt - 1
                     return outcome
                 last_error = outcome
 
             if attempt >= attempts or not (last_error and last_error.retryable):
+                self.last_retry_count = attempt - 1
                 break
             delay = self._delay_for(attempt, last_error)
+            self.last_retry_count = attempt
             LOGGER.warning(
                 "Retrying %s %s in %.2fs (attempt %d/%d): %s",
                 method.upper(), safe_url, delay, attempt, attempts, sanitize(last_error),

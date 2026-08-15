@@ -5,4 +5,21 @@ access_cs_integration_sync_log_manager,cs.integration.sync.log.manager,model_cs_
 access_cs_integration_sync_log_user,cs.integration.sync.log.user,model_cs_integration_sync_log,base.group_user,1,0,0,0
 access_cs_rpa_job_manager,cs.rpa.job.manager,model_cs_rpa_job,cs_integration_lab.group_integration_manager,1,1,1,1
 access_cs_rpa_job_user,cs.rpa.job.user,model_cs_rpa_job,base.group_user,1,0,0,0
+access_cs_m365_tenant_manager,cs.m365.tenant.manager,model_cs_m365_tenant,cs_integration_lab.group_integration_manager,1,1,1,1
+access_cs_m365_tenant_user,cs.m365.tenant.user,model_cs_m365_tenant,base.group_user,1,0,0,0
+access_cs_m365_domain_manager,cs.m365.domain.manager,model_cs_m365_domain,cs_integration_lab.group_integration_manager,1,1,1,1
+access_cs_m365_domain_user,cs.m365.domain.user,model_cs_m365_domain,base.group_user,1,0,0,0
+access_cs_m365_sku_manager,cs.m365.sku.manager,model_cs_m365_sku,cs_integration_lab.group_integration_manager,1,1,1,1
+access_cs_m365_sku_user,cs.m365.sku.user,model_cs_m365_sku,base.group_user,1,0,0,0
+access_cs_m365_group_manager,cs.m365.group.manager,model_cs_m365_group,cs_integration_lab.group_integration_manager,1,1,1,1
+access_cs_m365_group_user,cs.m365.group.user,model_cs_m365_group,base.group_user,1,0,0,0
+access_cs_m365_capability_manager,cs.m365.capability.manager,model_cs_m365_capability,cs_integration_lab.group_integration_manager,1,1,1,1
+access_cs_m365_capability_user,cs.m365.capability.user,model_cs_m365_capability,base.group_user,1,0,0,0
+access_cs_m365_user_snapshot_manager,cs.m365.user.snapshot.manager,model_cs_m365_user_snapshot,cs_integration_lab.group_integration_manager,1,1,1,1
+access_cs_m365_user_snapshot_user,cs.m365.user.snapshot.user,model_cs_m365_user_snapshot,base.group_user,1,0,0,0
+access_cs_m365_operation_manager,cs.m365.operation.manager,model_cs_m365_operation,cs_integration_lab.group_integration_manager,1,1,1,1
+access_cs_m365_operation_user,cs.m365.operation.user,model_cs_m365_operation,base.group_user,1,0,0,0
+access_cs_m365_graph_audit_log_manager,cs.m365.graph.audit.log.manager,model_cs_m365_graph_audit_log,cs_integration_lab.group_integration_manager,1,1,1,1
+access_cs_m365_graph_audit_log_user,cs.m365.graph.audit.log.user,model_cs_m365_graph_audit_log,base.group_user,1,0,0,0
+
 

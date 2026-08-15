@@ -1,0 +1,191 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- ========================================================= -->
+    <!-- Microsoft 365 Operation — List View                        -->
+    <!-- ========================================================= -->
+    <record id="view_m365_operation_list" model="ir.ui.view">
+        <field name="name">cs.m365.operation.list</field>
+        <field name="model">cs.m365.operation</field>
+        <field name="arch" type="xml">
+            <list string="Microsoft 365 Operations"
+                  decoration-info="state in ('draft', 'planned', 'awaiting_approval')"
+                  decoration-primary="state == 'running'"
+                  decoration-success="state == 'verified'"
+                  decoration-warning="state == 'needs_human' or state == 'uncertain'"
+                  decoration-danger="state == 'failed'">
+                <field name="name"/>
+                <field name="operation_type" widget="badge"/>
+                <field name="target_upn"/>
+                <field name="state" widget="badge"
+                       decoration-info="state in ('draft', 'planned', 'awaiting_approval')"
+                       decoration-primary="state == 'running'"
+                       decoration-success="state == 'verified'"
+                       decoration-warning="state in ('needs_human', 'uncertain')"
+                       decoration-danger="state == 'failed'"/>
+                <field name="requested_by"/>
+                <field name="created_at"/>
+                <field name="started_at"/>
+                <field name="finished_at"/>
+                <field name="last_successful_step"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- ========================================================= -->
+    <!-- Microsoft 365 Operation — Form View                        -->
+    <!-- ========================================================= -->
+    <record id="view_m365_operation_form" model="ir.ui.view">
+        <field name="name">cs.m365.operation.form</field>
+        <field name="model">cs.m365.operation</field>
+        <field name="arch" type="xml">
+            <form string="Microsoft 365 Operation">
+                <header>
+                    <button name="action_approve" type="object" string="Approve" class="oe_highlight" invisible="state != 'planned'" groups="cs_integration_lab.group_integration_manager"/>
+                    <button name="action_reject" type="object" string="Reject" invisible="state not in ('planned', 'awaiting_approval')" groups="cs_integration_lab.group_integration_manager"/>
+                    <field name="state" widget="statusbar"
+                           statusbar_visible="draft,planned,awaiting_approval,running,verified"/>
+                </header>
+                <sheet>
+                    <div class="oe_button_box" name="button_box">
+                        <button class="oe_stat_button" type="action" name="%(cs_integration_lab.action_m365_graph_audit_log)d"
+                                icon="fa-list-alt" context="{'search_default_correlation_id': correlation_id}">
+                            <div class="o_stat_info">
+                                <span class="o_stat_text">Audit Logs</span>
+                            </div>
+                        </button>
+                    </div>
+                    <div class="oe_title">
+                        <label for="name" string="Reference"/>
+                        <h1><field name="name" readonly="1"/></h1>
+                        <div class="o_field_widget o_field_many2many_tags">
+                            <field name="operation_type" widget="badge" readonly="state != 'draft'"/>
+                        </div>
+                    </div>
+
+                    <group>
+                        <group string="Target">
+                            <field name="target_upn" readonly="state != 'draft'"/>
+                            <field name="target_graph_id" readonly="1"/>
+                            <field name="requested_by" readonly="state != 'draft'"/>
+                            <field name="correlation_id" readonly="1"/>
+                            <field name="target_group_id" readonly="state != 'draft'" invisible="operation_type not in ('onboarding', 'remediation')"/>
+                            <field name="target_sku_id" readonly="state != 'draft'" invisible="operation_type not in ('onboarding', 'remediation')"/>
+                            <field name="remediation_action" readonly="state != 'draft'" invisible="operation_type != 'remediation'"/>
+                        </group>
+                        <group string="Timeline">
+                            <field name="created_at" readonly="1"/>
+                            <field name="started_at" readonly="1"/>
+                            <field name="finished_at" readonly="1"/>
+                            <field name="last_successful_step" readonly="1"/>
+                        </group>
+                    </group>
+
+                    <notebook>
+                        <page string="Planned Mutations (Dry Run)" name="planned_mutations" invisible="state == 'draft'">
+                            <div class="alert alert-warning" role="alert" invisible="state != 'planned'">
+                                <strong>DRY RUN:</strong> No Microsoft 365 changes have been made yet. Review the planned mutations below and click Approve to execute.
+                            </div>
+                            <field name="planned_mutations" readonly="1" widget="code" options="{'mode': 'javascript'}"
+                                   placeholder="Planned mutations will appear here after a dry-run..."/>
+                        </page>
+                        <page string="Execution Result" name="result" invisible="state in ('draft', 'planned', 'awaiting_approval')">
+                            <group>
+                                <field name="verification_passed" readonly="1"/>
+                            </group>
+                            <field name="execution_result" readonly="1"
+                                   placeholder="Execution result and read-back verification output..."/>
+                            <field name="result" readonly="1" invisible="1"/>
+                        </page>
+                        <page string="Approval Information" name="approval">
+                            <field name="approval_info" readonly="1"
+                                   placeholder="Approval details, approver, timestamp..."/>
+                        </page>
+                        <page string="Full Operation JSON" name="notes">
+                            <field name="notes" readonly="1"
+                                   placeholder="Complete structured JSON payload..."/>
+                        </page>
+                        <page string="Error Details" name="errors"
+                              invisible="not error_details">
+                            <field name="error_details" readonly="1"/>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- ========================================================= -->
+    <!-- Microsoft 365 Operation — Search View                      -->
+    <!-- ========================================================= -->
+    <record id="view_m365_operation_search" model="ir.ui.view">
+        <field name="name">cs.m365.operation.search</field>
+        <field name="model">cs.m365.operation</field>
+        <field name="arch" type="xml">
+            <search string="Search Operations">
+                <field name="name" string="Reference"/>
+                <field name="target_upn" string="Target UPN"/>
+                <field name="requested_by"/>
+                <field name="correlation_id"/>
+                <separator/>
+                <!-- State filters -->
+                <filter string="Draft" name="filter_draft"
+                        domain="[('state', '=', 'draft')]"/>
+                <filter string="Planned" name="filter_planned"
+                        domain="[('state', '=', 'planned')]"/>
+                <filter string="Awaiting Approval" name="filter_awaiting"
+                        domain="[('state', '=', 'awaiting_approval')]"/>
+                <filter string="Running" name="filter_running"
+                        domain="[('state', '=', 'running')]"/>
+                <filter string="Verified" name="filter_verified"
+                        domain="[('state', '=', 'verified')]"/>
+                <filter string="Failed" name="filter_failed"
+                        domain="[('state', '=', 'failed')]"/>
+                <filter string="Needs Human" name="filter_needs_human"
+                        domain="[('state', '=', 'needs_human')]"/>
+                <filter string="Uncertain" name="filter_uncertain"
+                        domain="[('state', '=', 'uncertain')]"/>
+                <separator/>
+                <!-- Operation type filters -->
+                <filter string="Onboarding" name="filter_onboarding"
+                        domain="[('operation_type', '=', 'onboarding')]"/>
+                <filter string="Offboarding" name="filter_offboarding"
+                        domain="[('operation_type', '=', 'offboarding')]"/>
+                <filter string="Remediation" name="filter_remediation"
+                        domain="[('operation_type', '=', 'remediation')]"/>
+                <filter string="User 360" name="filter_user_360"
+                        domain="[('operation_type', '=', 'user_360')]"/>
+                <separator/>
+                <group expand="0" string="Group By">
+                    <filter string="State" name="groupby_state"
+                            context="{'group_by': 'state'}"/>
+                    <filter string="Operation Type" name="groupby_type"
+                            context="{'group_by': 'operation_type'}"/>
+                    <filter string="Created Date" name="groupby_date"
+                            context="{'group_by': 'created_at:day'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <!-- ========================================================= -->
+    <!-- Microsoft 365 Operation — Window Action                    -->
+    <!-- ========================================================= -->
+    <record id="action_m365_operation" model="ir.actions.act_window">
+        <field name="name">M365 Operations</field>
+        <field name="res_model">cs.m365.operation</field>
+        <field name="view_mode">list,form</field>
+        <field name="search_view_id" ref="view_m365_operation_search"/>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                No Microsoft 365 operations recorded yet.
+            </p>
+            <p>
+                Use the CLI to trigger onboarding, offboarding, or remediation operations:
+                <br/>
+                <code>python -m integration_service.cli --onboard</code><br/>
+                <code>python -m integration_service.cli --offboard --upn "lab-user@domain.com"</code><br/>
+                <code>python -m integration_service.cli --remediate --action block_signin --upn "lab-user@domain.com"</code>
+            </p>
+        </field>
+    </record>
+</odoo>
