@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- ========================================================= -->
+    <!-- Microsoft Graph API Audit Log — List View                  -->
+    <!-- ========================================================= -->
+    <record id="view_m365_graph_audit_log_list" model="ir.ui.view">
+        <field name="name">cs.m365.graph.audit.log.list</field>
+        <field name="model">cs.m365.graph.audit.log</field>
+        <field name="arch" type="xml">
+            <list string="Graph API Audit Log"
+                  create="false"
+                  decoration-success="success == True"
+                  decoration-danger="success == False">
+                <field name="timestamp"/>
+                <field name="operation_label"/>
+                <field name="http_method" widget="badge"
+                       decoration-info="http_method == 'GET'"
+                       decoration-primary="http_method in ('POST', 'PATCH', 'PUT')"
+                       decoration-danger="http_method == 'DELETE'"/>
+                <field name="resource"/>
+                <field name="http_status"/>
+                <field name="success" widget="boolean"/>
+                <field name="duration_ms" string="Duration (ms)"/>
+                <field name="retry_count"/>
+                <field name="graph_request_id"/>
+                <field name="tenant_display"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- ========================================================= -->
+    <!-- Microsoft Graph API Audit Log — Form View                  -->
+    <!-- ========================================================= -->
+    <record id="view_m365_graph_audit_log_form" model="ir.ui.view">
+        <field name="name">cs.m365.graph.audit.log.form</field>
+        <field name="model">cs.m365.graph.audit.log</field>
+        <field name="arch" type="xml">
+            <form string="Graph API Audit Event" create="false">
+                <sheet>
+                    <div class="oe_title">
+                        <h1><field name="name" readonly="1"/></h1>
+                        <h2><field name="operation_label" readonly="1" placeholder="Operation"/></h2>
+                    </div>
+                    <group>
+                        <group string="Request">
+                            <field name="http_method" readonly="1" widget="badge"/>
+                            <field name="resource" readonly="1"/>
+                            <field name="tenant_display" readonly="1"/>
+                            <field name="timestamp" readonly="1"/>
+                        </group>
+                        <group string="Response">
+                            <field name="http_status" readonly="1"/>
+                            <field name="success" readonly="1" widget="boolean"/>
+                            <field name="duration_ms" readonly="1" string="Duration (ms)"/>
+                            <field name="retry_count" readonly="1"/>
+                        </group>
+                    </group>
+                    <group string="Correlation &amp; Tracking">
+                        <field name="graph_request_id" readonly="1"/>
+                        <field name="correlation_id" readonly="1"/>
+                    </group>
+                    <notebook>
+                        <page string="Error Details" name="errors"
+                              invisible="not sanitized_error">
+                            <field name="sanitized_error" readonly="1"/>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- ========================================================= -->
+    <!-- Microsoft Graph API Audit Log — Search View                -->
+    <!-- ========================================================= -->
+    <record id="view_m365_graph_audit_log_search" model="ir.ui.view">
+        <field name="name">cs.m365.graph.audit.log.search</field>
+        <field name="model">cs.m365.graph.audit.log</field>
+        <field name="arch" type="xml">
+            <search string="Search Graph Audit Logs">
+                <field name="operation_label" string="Operation"/>
+                <field name="resource" string="Resource Endpoint"/>
+                <field name="graph_request_id"/>
+                <field name="tenant_display" string="Tenant"/>
+                <separator/>
+                <filter string="Successful" name="filter_success"
+                        domain="[('success', '=', True)]"/>
+                <filter string="Failed" name="filter_failed"
+                        domain="[('success', '=', False)]"/>
+                <separator/>
+                <filter string="GET" name="filter_get"
+                        domain="[('http_method', '=', 'GET')]"/>
+                <filter string="POST" name="filter_post"
+                        domain="[('http_method', '=', 'POST')]"/>
+                <filter string="PATCH" name="filter_patch"
+                        domain="[('http_method', '=', 'PATCH')]"/>
+                <filter string="DELETE" name="filter_delete"
+                        domain="[('http_method', '=', 'DELETE')]"/>
+                <separator/>
+                <filter string="With Retries" name="filter_retried"
+                        domain="[('retry_count', '>', 0)]"/>
+                <separator/>
+                <group expand="0" string="Group By">
+                    <filter string="Operation" name="groupby_operation"
+                            context="{'group_by': 'operation_label'}"/>
+                    <filter string="HTTP Method" name="groupby_method"
+                            context="{'group_by': 'http_method'}"/>
+                    <filter string="Success/Failure" name="groupby_success"
+                            context="{'group_by': 'success'}"/>
+                    <filter string="Date" name="groupby_date"
+                            context="{'group_by': 'timestamp:day'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <!-- ========================================================= -->
+    <!-- Microsoft Graph API Audit Log — Window Action              -->
+    <!-- ========================================================= -->
+    <record id="action_m365_graph_audit_log" model="ir.actions.act_window">
+        <field name="name">Graph Audit Logs</field>
+        <field name="res_model">cs.m365.graph.audit.log</field>
+        <field name="view_mode">list,form</field>
+        <field name="search_view_id" ref="view_m365_graph_audit_log_search"/>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                No Microsoft Graph API audit events recorded yet.
+            </p>
+            <p>
+                Every Graph API call (GET, POST, PATCH, DELETE) is automatically
+                recorded here when the Microsoft 365 integration runs. No credentials
+                or access tokens are ever stored.
+            </p>
+        </field>
+    </record>
+</odoo>

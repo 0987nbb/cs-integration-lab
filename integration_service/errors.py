@@ -90,12 +90,47 @@ class ClientError(HttpError):
         super().__init__(message, status_code=status_code, url=url, retryable=False, body=body)
 
 
+class AuthenticationError(ClientError):
+    """HTTP 401 Unauthorized / Token failure."""
+
+    def __init__(
+        self,
+        message: str,
+        status_code: int = 401,
+        url: Optional[str] = None,
+        body: Optional[str] = None,
+    ) -> None:
+        super().__init__(message, status_code=status_code, url=url, body=body)
+
+
+class AuthorizationError(ClientError):
+    """HTTP 403 Forbidden / Insufficient permissions."""
+
+    def __init__(
+        self,
+        message: str,
+        status_code: int = 403,
+        url: Optional[str] = None,
+        body: Optional[str] = None,
+    ) -> None:
+        super().__init__(message, status_code=status_code, url=url, body=body)
+
+
+class ThrottledError(RateLimitError):
+    """HTTP 429 Throttling / Rate limiting."""
+
+
 class InvalidPayloadError(IntegrationError):
     """The upstream answered successfully but the body is not usable.
 
     Raised for non-JSON bodies, and for JSON whose shape does not match what the
     connector requires (missing keys, wrong container type, unparseable values).
     """
+
+
+class GraphProtocolError(InvalidPayloadError):
+    """Microsoft Graph API response format error or malformed pagination."""
+
 
 
 class OdooError(IntegrationError):

@@ -33,6 +33,9 @@ _PATTERNS = (
     # Authorization: Bearer <token>  /  Authorization: Basic <blob>
     (re.compile(r"(?i)\b(authorization\s*[:=]\s*)(bearer|basic|token)?\s*\S+"),
      lambda m: f"{m.group(1)}{(m.group(2) or '')} {REDACTED}".replace("  ", " ")),
+    # Error strings often contain bare fragments such as "Bearer <token>".
+    (re.compile(r"(?i)\b(bearer|basic|token)\s+[A-Za-z0-9._~+/=-]{8,}"),
+     lambda m: f"{m.group(1)} {REDACTED}"),
     # ?token=... &access_token=... &api_key=... &apikey=... &key=... &password=...
     (re.compile(r"(?i)([?&](?:access_token|api[_-]?key|apikey|token|password|secret|passwd|pwd)=)[^&\s\"']+"),
      lambda m: f"{m.group(1)}{REDACTED}"),

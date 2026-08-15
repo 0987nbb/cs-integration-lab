@@ -63,6 +63,8 @@ class OdooSettings:
     url: str
     database: str
     api_key: str
+    web_login: str = ""
+    web_password: str = ""
     timeout: int = 30
 
     def validate(self) -> None:
@@ -158,6 +160,25 @@ class NagerSettings:
 
 
 @dataclass
+class M365Settings:
+    tenant_id: str = ""
+    client_id: str = ""
+    client_secret: str = ""
+    graph_base_url: str = "https://graph.microsoft.com/v1.0"
+    scopes: List[str] = field(default_factory=lambda: ["https://graph.microsoft.com/.default"])
+
+    @property
+    def authority(self) -> str:
+        if self.tenant_id:
+            return f"https://login.microsoftonline.com/{self.tenant_id}"
+        return "https://login.microsoftonline.com/common"
+
+    @property
+    def is_configured(self) -> bool:
+        return bool(self.tenant_id and self.client_id and self.client_secret)
+
+
+@dataclass
 class Settings:
     odoo: OdooSettings
     http: HttpSettings
@@ -166,6 +187,7 @@ class Settings:
     frankfurter: FrankfurterSettings
     open_meteo: OpenMeteoSettings
     nager: NagerSettings
+    m365: M365Settings = field(default_factory=M365Settings)
     sample_limit: int = 10
     dry_run: bool = False
     sync_log_fallback_path: str = "logs/sync_log.jsonl"
@@ -177,17 +199,26 @@ def load_settings() -> Settings:
         url=_str("ODOO_URL").rstrip("/"),
         database=_str("ODOO_DATABASE"),
         api_key=_str("ODOO_API_KEY"),
+        web_login=_str("ODOO_WEB_LOGIN", ""),
+        web_password=_str("ODOO_WEB_PASSWORD", ""),
         timeout=_int("ODOO_TIMEOUT", 30),
     )
 
     github = GitHubSettings(
         api_url=_str("GITHUB_API_URL", "https://api.github.com").rstrip("/"),
-        token=_str("GITHUB_TOKEN"),
+        token=_str("GITHUB_TOKEN", ""),
         owner=_str("GITHUB_OWNER", "octocat"),
         repo=_str("GITHUB_REPO", "Hello-World"),
         project_name=_str("GITHUB_PROJECT_NAME", "GitHub Issues"),
         sync_comments=_bool("GITHUB_SYNC_COMMENTS", True),
         per_page=max(1, min(100, _int("GITHUB_PER_PAGE", 100))),
+    )
+
+    m365 = M365Settings(
+        tenant_id=_str("M365_TENANT_ID", ""),
+        client_id=_str("M365_CLIENT_ID", ""),
+        client_secret=_str("M365_CLIENT_SECRET", ""),
+        graph_base_url=_str("M365_GRAPH_BASE_URL", "https://graph.microsoft.com/v1.0").rstrip("/"),
     )
 
     nager_years = []
@@ -240,13 +271,14 @@ def load_settings() -> Settings:
             countries=[c.upper() for c in _csv("NAGER_COUNTRIES", "US,DE")],
             years=nager_years,
         ),
+        m365=m365,
         sample_limit=_int("SYNC_SAMPLE_LIMIT", 10),
         dry_run=_bool("DRY_RUN", False),
         sync_log_fallback_path=_str("SYNC_LOG_FALLBACK_PATH", "logs/sync_log.jsonl"),
     )
 
     # Anything secret-shaped is masked from every log line and exception message.
-    register_secrets([odoo.api_key, github.token])
+    register_secrets([odoo.api_key, odoo.web_password, github.token, m365.client_secret])
     return settings
 
 

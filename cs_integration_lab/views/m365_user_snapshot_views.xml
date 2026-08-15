@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- ========================================================= -->
+    <!-- Microsoft 365 User Snapshot — List View                    -->
+    <!-- ========================================================= -->
+    <record id="view_m365_user_snapshot_list" model="ir.ui.view">
+        <field name="name">cs.m365.user.snapshot.list</field>
+        <field name="model">cs.m365.user.snapshot</field>
+        <field name="arch" type="xml">
+            <list string="User 360 Diagnostic Snapshots"
+                  create="false"
+                  decoration-success="diagnostic_status == 'success'"
+                  decoration-warning="diagnostic_status == 'partial'"
+                  decoration-danger="diagnostic_status == 'failed'">
+                <field name="upn"/>
+                <field name="display_name"/>
+                <field name="account_enabled" widget="boolean_toggle"/>
+                <field name="job_title"/>
+                <field name="department"/>
+                <field name="usage_location"/>
+                <field name="direct_groups_count"/>
+                <field name="transitive_groups_count"/>
+                <field name="diagnostic_status" widget="badge"
+                       decoration-success="diagnostic_status == 'success'"
+                       decoration-warning="diagnostic_status == 'partial'"
+                       decoration-danger="diagnostic_status == 'failed'"/>
+                <field name="snapshot_timestamp"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- ========================================================= -->
+    <!-- Microsoft 365 User Snapshot — Form View                    -->
+    <!-- ========================================================= -->
+    <record id="view_m365_user_snapshot_form" model="ir.ui.view">
+        <field name="name">cs.m365.user.snapshot.form</field>
+        <field name="model">cs.m365.user.snapshot</field>
+        <field name="arch" type="xml">
+            <form string="User 360 Diagnostic Snapshot" create="false">
+                <header>
+                    <field name="diagnostic_status" widget="statusbar"
+                           statusbar_visible="success,partial,failed"/>
+                </header>
+                <sheet>
+                    <div class="oe_title">
+                        <label for="upn" string="User Principal Name"/>
+                        <h1><field name="upn" readonly="1"/></h1>
+                        <h2><field name="display_name" readonly="1" placeholder="Display Name"/></h2>
+                    </div>
+                    <group>
+                        <group string="Identity">
+                            <field name="graph_id" readonly="1"/>
+                            <field name="account_enabled" readonly="1" widget="boolean_toggle"/>
+                            <field name="job_title" readonly="1"/>
+                            <field name="department" readonly="1"/>
+                            <field name="usage_location" readonly="1"/>
+                            <field name="manager_upn" readonly="1"/>
+                        </group>
+                        <group string="Memberships &amp; Services">
+                            <field name="direct_groups_count" readonly="1"/>
+                            <field name="transitive_groups_count" readonly="1"/>
+                            <field name="auth_methods_status" readonly="1"/>
+                            <field name="devices_count" readonly="1"/>
+                        </group>
+                    </group>
+                    <group string="Snapshot Metadata">
+                        <field name="snapshot_timestamp" readonly="1"/>
+                        <field name="diagnostic_status" readonly="1"/>
+                    </group>
+                    <notebook>
+                        <page string="Assigned Licenses" name="licenses">
+                            <field name="assigned_licenses" readonly="1"
+                                   placeholder="No licenses data captured."/>
+                        </page>
+                        <page string="Full Diagnostic JSON" name="notes">
+                            <field name="notes" readonly="1"
+                                   placeholder="Full structured JSON diagnostic payload..."/>
+                        </page>
+                        <page string="Error Details" name="errors"
+                              invisible="not error_details">
+                            <field name="error_details" readonly="1"/>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- ========================================================= -->
+    <!-- Microsoft 365 User Snapshot — Search View                  -->
+    <!-- ========================================================= -->
+    <record id="view_m365_user_snapshot_search" model="ir.ui.view">
+        <field name="name">cs.m365.user.snapshot.search</field>
+        <field name="model">cs.m365.user.snapshot</field>
+        <field name="arch" type="xml">
+            <search string="Search User Snapshots">
+                <field name="upn" string="UPN"/>
+                <field name="display_name" string="Display Name"/>
+                <field name="department"/>
+                <field name="usage_location"/>
+                <separator/>
+                <filter string="Enabled Accounts" name="filter_enabled"
+                        domain="[('account_enabled', '=', True)]"/>
+                <filter string="Disabled Accounts" name="filter_disabled"
+                        domain="[('account_enabled', '=', False)]"/>
+                <separator/>
+                <filter string="Success" name="filter_success"
+                        domain="[('diagnostic_status', '=', 'success')]"/>
+                <filter string="Partial" name="filter_partial"
+                        domain="[('diagnostic_status', '=', 'partial')]"/>
+                <filter string="Failed" name="filter_failed"
+                        domain="[('diagnostic_status', '=', 'failed')]"/>
+                <separator/>
+                <group expand="0" string="Group By">
+                    <filter string="Diagnostic Status" name="groupby_status"
+                            context="{'group_by': 'diagnostic_status'}"/>
+                    <filter string="Department" name="groupby_department"
+                            context="{'group_by': 'department'}"/>
+                    <filter string="Usage Location" name="groupby_location"
+                            context="{'group_by': 'usage_location'}"/>
+                    <filter string="Snapshot Date" name="groupby_date"
+                            context="{'group_by': 'snapshot_timestamp:day'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <!-- ========================================================= -->
+    <!-- Microsoft 365 User Snapshot — Window Action                -->
+    <!-- ========================================================= -->
+    <record id="action_m365_user_snapshot" model="ir.actions.act_window">
+        <field name="name">User 360 Snapshots</field>
+        <field name="res_model">cs.m365.user.snapshot</field>
+        <field name="view_mode">list,form</field>
+        <field name="search_view_id" ref="view_m365_user_snapshot_search"/>
+        <field name="context">{'search_default_filter_success': 1}</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                No User 360 diagnostic snapshots yet.
+            </p>
+            <p>
+                Run <code>python -m integration_service.cli --user-360 --upn "user@domain.com"</code>
+                to collect and persist a real-time diagnostic snapshot for any Microsoft 365 user.
+            </p>
+        </field>
+    </record>
+</odoo>

@@ -3,4 +3,6 @@ from . import idempotency_mixin
 from . import sync_log
 from . import integration_config
 from . import rpa_job
+from . import m365_tenant
+
 

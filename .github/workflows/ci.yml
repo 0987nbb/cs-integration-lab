@@ -27,6 +27,17 @@ jobs:
           pip install -r requirements.txt
           python -m playwright install chromium --with-deps
 
+      - name: Run Microsoft 365 Graph mocked safety suite
+        env:
+          M365_TENANT_ID: test-tenant
+          M365_CLIENT_ID: test-client
+          M365_CLIENT_SECRET: test-client-secret
+          ODOO_URL: https://example.invalid
+          ODOO_DATABASE: test-db
+          ODOO_API_KEY: test-api-key
+        run: |
+          python -m pytest -q tests/test_ms_graph_client.py tests/test_ms_graph_foundation.py tests/test_tenant_readiness.py tests/test_user_360.py tests/test_onboarding.py tests/test_remediation.py tests/test_offboarding.py tests/test_m365_edge_cases.py tests/test_safety_boundary.py
+
       - name: Run pytest test suite
         env:
           SAUCEDEMO_URL: https://www.saucedemo.com

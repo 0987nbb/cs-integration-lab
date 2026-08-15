@@ -227,7 +227,15 @@ class OdooClient:
         res = self._request(model, "create", payload)
         if isinstance(res, int):
             return [res]
-        return list(res or [])
+        if isinstance(res, list):
+            cleaned: List[int] = []
+            for item in res:
+                if isinstance(item, int):
+                    cleaned.append(item)
+                elif isinstance(item, dict) and "id" in item:
+                    cleaned.append(int(item["id"]))
+            return cleaned
+        return []
 
     def create_one(self, model: str, vals: Vals) -> Optional[int]:
         ids = self.create(model, [vals])

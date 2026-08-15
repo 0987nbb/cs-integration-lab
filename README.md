@@ -237,3 +237,22 @@ The external Python RPA worker (`integration_service/rpa_worker/`) polls Odoo fo
 .venv/Scripts/python.exe -m pytest tests/test_rpa_worker.py -q
 ```
 
+
+---
+
+## Phase 3: Microsoft 365 Graph Operations Layer
+
+This phase introduces a robust, multi-tenant capable operations layer for Microsoft 365, built exclusively on Microsoft Graph API. It acts as the technical foundation for zero-touch employee onboarding, offboarding, and IT helpdesk automation, controlled entirely through Odoo.
+
+### Quick Links to Documentation
+* [Architecture & Authentication Decoupling](docs/m365_operations_architecture.md) - Details the swappable `TokenProvider` design supporting multi-tenant authentication without altering business logic.
+* [Microsoft Graph Permissions Matrix](docs/microsoft_graph_permissions.md) - The least-privileged permissions mapped to specific onboarding/offboarding/remediation operations.
+* [API & Operation Mapping](docs/m365_api_operation_mapping.md) - The exact HTTP methods and Graph endpoints used for every synthetic action.
+
+### Architecture Highlights
+- **Tenant Readiness**: Discovers tenant ID, available licenses, subscribed SKUs, and `LAB-*` test groups dynamically.
+- **Strict Safety Boundaries**: Graph mutations are strictly restricted to synthetic users and groups prefixed with `LAB-*`.
+- **Synthetic Onboarding & Offboarding**: Features a Plan (dry-run) and Execute phase with an explicit Odoo approval gate.
+- **Idempotency & Read-back Verification**: Graph actions verify the pre-state before making mutations and strictly verify the post-state (checking group memberships, assigned licenses, etc.) to confirm success.
+- **Helpdesk Remediation**: 8 individually callable operations including session revocation, blocking sign-in, and password resets.
+- **Atomic Claims**: Operations are claimed atomically (`awaiting_approval` -> `running`) preventing duplicate executions from parallel workers.

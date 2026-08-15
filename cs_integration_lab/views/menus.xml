@@ -1,31 +1,72 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
     <data>
-        <!-- Root Menu -->
+        <!-- ===================================================== -->
+        <!-- Root Menu                                               -->
+        <!-- ===================================================== -->
         <menuitem id="menu_cs_integration_lab_root"
                   name="Integration Lab"
                   web_icon="cs_integration_lab,static/description/icon.png"
                   sequence="10"/>
 
-        <!-- Integrations Submenu -->
+        <!-- ===================================================== -->
+        <!-- Integrations (unchanged)                               -->
+        <!-- ===================================================== -->
         <menuitem id="menu_cs_integration_config"
                   name="Integrations"
                   parent="menu_cs_integration_lab_root"
                   action="action_cs_integration_config"
                   sequence="10"/>
 
-        <!-- RPA Browser Automation Jobs Submenu -->
+        <!-- ===================================================== -->
+        <!-- Browser Automation Jobs (unchanged)                    -->
+        <!-- ===================================================== -->
         <menuitem id="menu_cs_rpa_job"
                   name="Browser Automation Jobs"
                   parent="menu_cs_integration_lab_root"
                   action="action_cs_rpa_job"
                   sequence="15"/>
 
-        <!-- Sync Logs Submenu -->
+        <!-- ===================================================== -->
+        <!-- Microsoft 365 — Parent Submenu                        -->
+        <!-- ===================================================== -->
+        <menuitem id="menu_cs_m365_root"
+                  name="Microsoft 365"
+                  parent="menu_cs_integration_lab_root"
+                  sequence="20"/>
+
+        <menuitem id="menu_cs_m365_tenant"
+                  name="Tenants"
+                  parent="menu_cs_m365_root"
+                  action="action_m365_tenant"
+                  sequence="10"/>
+
+        <menuitem id="menu_cs_m365_user_snapshot"
+                  name="User Snapshots"
+                  parent="menu_cs_m365_root"
+                  action="action_m365_user_snapshot"
+                  sequence="20"/>
+
+        <menuitem id="menu_cs_m365_operation"
+                  name="Operations"
+                  parent="menu_cs_m365_root"
+                  action="action_m365_operation"
+                  sequence="30"/>
+
+        <menuitem id="menu_cs_m365_graph_audit_log"
+                  name="Graph Audit Logs"
+                  parent="menu_cs_m365_root"
+                  action="action_m365_graph_audit_log"
+                  sequence="40"/>
+
+        <!-- ===================================================== -->
+        <!-- Sync Logs (unchanged)                                  -->
+        <!-- ===================================================== -->
         <menuitem id="menu_cs_integration_sync_log"
                   name="Sync Logs"
                   parent="menu_cs_integration_lab_root"
                   action="action_cs_integration_sync_log"
-                  sequence="20"/>
+                  sequence="30"/>
     </data>
 </odoo>
+
